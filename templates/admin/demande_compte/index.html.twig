@@ -23,7 +23,8 @@
 {% block body %}
   <p class="mt-2">
     Les députés qui ont demandé un accès depuis <a href="{{ path('demande_compte_depute') }}" target="_blank" rel="noopener">/demande-compte-depute</a>.
-    Approuver une demande ouvre le compte et affiche, une seule fois, les identifiants à transmettre au député.
+    Approuver une demande émet un <strong>lien d'activation</strong> à transmettre à l'adresse de l'Assemblée nationale : le député y crée
+    lui-même son compte et choisit son mot de passe. Le lien s'affiche ici après approbation (et part par courriel au déploiement).
   </p>
 
   <div class="card">
@@ -47,7 +48,7 @@
               <td class="text-right">
                 <form method="post" action="{{ path('admin_demande_compte_approuver', {id: demande.id}) }}" class="d-inline">
                   <input type="hidden" name="_token" value="{{ csrf_token('traiter_demande_' ~ demande.id) }}">
-                  <button type="submit" class="btn btn-sm btn-primary">Approuver et ouvrir le compte</button>
+                  <button type="submit" class="btn btn-sm btn-primary">Approuver et émettre le lien</button>
                 </form>
                 <form method="post" action="{{ path('admin_demande_compte_refuser', {id: demande.id}) }}" class="d-inline"
                       onsubmit="return confirm('Refuser cette demande ?');">

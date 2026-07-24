@@ -96,6 +96,47 @@
 
     {% block javascripts_head %}{% endblock %}
 
+    {% if matomo_url %}
+      {# Matomo auto-hébergé, hors consentement : la configuration est exemptée
+         CNIL (l'extrait « CODE CNIL » plafonne le cookie visiteur à 13 mois),
+         et l'opt-out vit dans les mentions légales. Le traceur s'appelle
+         1337.js/1337.php — le renommage anti-bloqueurs de l'origine
+         (header.php:157-189), repris tel quel. Deux vestiges de l'origine ne
+         sont PAS repris : l'onload="embedTracker()" du preload (la fonction
+         n'existe nulle part — ReferenceError silencieuse sur chaque page du
+         site vivant) et le pistage dans l'iframe embarquée chez des tiers
+         (retiré sciemment, cf. IframeController). #}
+      <link rel="preload" href="{{ matomo_url }}/1337.js" as="script" crossorigin>
+      <script type="text/javascript">
+        var _paq = window._paq = window._paq || [];
+        // CODE CNIL
+        _paq.push([function() {
+            var self = this;
+            function getOriginalVisitorCookieTimeout() {
+                var now = new Date(),
+                nowTs = Math.round(now.getTime() / 1000),
+                visitorInfo = self.getVisitorInfo();
+                var createTs = parseInt(visitorInfo[2]);
+                var cookieTimeout = 33696000; // 13 mois en secondes
+                var originalTimeout = createTs + cookieTimeout - nowTs;
+                return originalTimeout;
+            }
+            this.setVisitorCookieTimeout( getOriginalVisitorCookieTimeout() );
+        }]);
+        // FIN CODE CNIL
+        _paq.push(['trackPageView']);
+        _paq.push(['enableLinkTracking']);
+        (function() {
+          var u="{{ matomo_url }}/";
+          _paq.push(['setTrackerUrl', u+'1337.php']);
+          _paq.push(['setSiteId', '1']);
+          var d=document, g=d.createElement('script'), s=d.getElementsByTagName('script')[0];
+          g.type='text/javascript'; g.async=true; g.src=u+'1337.js'; s.parentNode.insertBefore(g,s);
+        })();
+      </script>
+      <noscript><p><img src="{{ matomo_url }}/1337.php?idsite=1&amp;rec=1" style="border:0;" alt="" /></p></noscript>
+    {% endif %}
+
     <style media="screen">
       body {
         position: relative;
@@ -223,6 +264,7 @@
         </div>
       </div>
     </div>
+    {{ include('partials/modale_don.html.twig') }}
     {# Hors accueil, une partie des liens du pied de page est masquée aux robots
        (footer.php:71-207) : le jus de chaque page ne se dilue pas dans les liens
        de gabarit, et seul l'accueil les expose aux moteurs. Le tri du legacy est
@@ -264,10 +306,18 @@
                   <p><a href="{{ path('blog_index') }}" class="no-decoration underline">Blog</a></p>
                   <p><a href="{{ path('parrainages_index') }}" class="no-decoration underline">Parrainages 2022</a></p>
                   <p><a href="{{ path('faq_index') }}" class="no-decoration underline">Foire aux questions</a></p>
-                  {# Le site pointe vers /login, l'entrée des comptes lecteurs —
-                     non portés (TODO §4). Notre /connexion (rédaction, députés)
-                     n'est pas cette page : le lien attend la sienne. #}
-                  <p><a href="#" class="no-decoration underline">Connexion</a></p>
+                  {# Câblé le 24 juillet, à la livraison des comptes lecteurs :
+                     la route `connexion` sert désormais /login, l'adresse du
+                     legacy, et le formulaire unique connecte lecteurs,
+                     rédaction et députés. C'était le dernier lien mort du
+                     gabarit. #}
+                  <p>
+                    {% if sur_accueil %}
+                      <a href="{{ path('connexion') }}" class="no-decoration underline">Connexion</a>
+                    {% else %}
+                      <span class="url_obf no-decoration underline text-white" url_obf="{{ url_obf(path('connexion')) }}">Connexion</span>
+                    {% endif %}
+                  </p>
                   <p>
                     {% if sur_accueil %}
                       <a href="{{ path('page_mentions_legales') }}" class="no-decoration underline">Mentions légales</a>
@@ -381,6 +431,103 @@
     {# Bibliothèques dont un script de page a besoin avant lui : Isotope, Chart.js… #}
     {% block javascripts_libraries %}{% endblock %}
     <script src="{{ asset('assets/js/libraries/jquery/jquery.unveil.min.js') }}"></script>
+
+    {# Bannière de consentement (footer.php:230-345), servie sur toute page
+       comme à l'origine — même version épinglée du CDN. Elle pilote deux
+       services : GTM (si configuré) et « datantracking », le compteur mensuel
+       de pages en cookie qui ouvre la modale de dons au seuil de 10 pages.
+       Deux corrections commentées : le « readmoreLink » de l'origine pointe
+       /cookiespolicy, une adresse qui n'a jamais existé (404 depuis toujours)
+       — remplacé par les mentions légales ; et le compteur de pied de page
+       (#monthly-pages-visited-count) n'est pas reproduit, l'élément n'existant
+       dans aucune vue de l'origine (le JS le garde par un `if`). #}
+    <script type="text/javascript">
+      var tarteaucitronForceLanguage = "fr";
+    </script>
+    <script src="https://cdn.jsdelivr.net/gh/AmauriC/tarteaucitron.js@20210329/tarteaucitron.min.js"></script>
+    <script type="text/javascript">
+      tarteaucitron.init({
+        "privacyUrl": "{{ path('page_mentions_legales') }}",
+        "hashtag": "#tarteaucitron",
+        "cookieName": "tarteaucitron",
+        "orientation": "bottom",
+        "showAlertSmall": false,
+        "cookieslist": true,
+        "adblocker": false,
+        "AcceptAllCta": true,
+        "highPrivacy": true,
+        "handleBrowserDNTRequest": false,
+        "removeCredit": false,
+        "moreInfoLink": true,
+        "useExternalCss": false,
+        "readmoreLink": "{{ path('page_mentions_legales') }}"
+      });
+    </script>
+    {% if gtm_id %}
+      <script type="text/javascript">
+        tarteaucitron.user.googletagmanagerId = '{{ gtm_id }}';
+        (tarteaucitron.job = tarteaucitron.job || []).push('googletagmanager');
+      </script>
+    {% endif %}
+    <script type="text/javascript">
+      // Compteur de pages du mois, soumis à consentement : au-delà de 10 pages
+      // vues, la modale de dons s'ouvre — au plus une fois par semaine.
+      tarteaucitron.services.datantracking = {
+          "key": "datantracking",
+          "type": "other",
+          "name": "Suivi des pages visitées",
+          "uri": "{{ path('page_mentions_legales') }}",
+          "needConsent": true,
+          "cookies": ["datan_monthly", "datan_modal_shown"],
+          "js": function () {
+              (function () {
+                  var THRESHOLD = 10;
+                  var ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+
+                  function getCookie(name) {
+                      var match = document.cookie.match(new RegExp('(^| )' + name + '=([^;]+)'));
+                      return match ? decodeURIComponent(match[2]) : null;
+                  }
+
+                  function setCookie(name, value, ms) {
+                      var expires = new Date(Date.now() + ms).toUTCString();
+                      document.cookie = name + '=' + encodeURIComponent(value) + '; expires=' + expires + '; path=/';
+                  }
+
+                  var now = new Date();
+                  var currentMonth = now.getFullYear() + '-' + (now.getMonth() + 1);
+
+                  var cookieRaw = getCookie('datan_monthly');
+                  var data = cookieRaw ? JSON.parse(decodeURIComponent(cookieRaw)) : null;
+
+                  if (!data || data.month !== currentMonth) {
+                      data = { month: currentMonth, count: 0 };
+                  }
+
+                  data.count++;
+
+                  setCookie('datan_monthly', JSON.stringify(data), 1000 * 60 * 60 * 24 * 60);
+
+                  if (data.count < THRESHOLD) return;
+
+                  var lastShown = getCookie('datan_modal_shown');
+                  if (lastShown && (Date.now() - parseInt(lastShown, 10)) < ONE_WEEK_MS) return;
+
+                  setCookie('datan_modal_shown', Date.now(), ONE_WEEK_MS);
+
+                  $(document).ready(function () {
+                      $('#modal-page-count').text(data.count);
+                      $('#donationModal').modal('show');
+                  });
+              })();
+          },
+          "fallback": function () {
+          }
+      };
+
+      (tarteaucitron.job = tarteaucitron.job || []).push('datantracking');
+    </script>
+
     {% block javascripts %}{% endblock %}
     <script type="text/javascript" src="{{ asset('assets/js/main.min.js') }}"></script>
     {# Décodeur des adresses masquées aux robots ({{ url_obf(...) }}) — chargé

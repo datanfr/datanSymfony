@@ -3,7 +3,6 @@
 namespace App\Controller\Admin;
 
 use App\Entity\DemandeCompteDepute;
-use App\Entity\Depute;
 use App\Entity\Utilisateur;
 use App\Repository\DemandeCompteDeputeRepository;
 use App\Repository\UtilisateurRepository;
@@ -11,26 +10,28 @@ use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
-use Symfony\Component\PasswordHasher\Hasher\UserPasswordHasherInterface;
+use Symfony\Component\Mailer\MailerInterface;
+use Symfony\Component\Mime\Address;
+use Symfony\Component\Mime\Email;
 use Symfony\Component\Routing\Attribute\Route;
+use Symfony\Component\Routing\Generator\UrlGeneratorInterface;
 use Symfony\Component\Security\Http\Attribute\IsGranted;
-use Symfony\Component\String\Slugger\AsciiSlugger;
 
 /**
  * Traitement des demandes de compte des députés (`/demande-compte-depute`).
  *
  * L'application d'origine n'avait pas d'écran d'administration : le député
- * recevait par courriel un lien d'activation et créait lui-même son compte. Ce
- * portage n'envoie pas de courriel — la validation passe donc par un
- * administrateur, qui relit la demande et ouvre le compte. C'est ici que se
- * reporte le contrôle par l'adresse institutionnelle : les identifiants sont
- * transmis à l'adresse `@assemblee-nationale.fr` que le député a saisie.
+ * recevait par courriel un lien d'activation et créait lui-même son compte via
+ * `/register/{token}`. Ce portage réintroduit ce lien, mais **en aval d'une
+ * relecture** : un administrateur approuve d'abord la demande, ce qui émet le
+ * jeton d'activation ; le lien `/register/{token}` part alors à l'adresse
+ * institutionnelle (par courriel au déploiement, MAILER_DSN) et s'affiche ici
+ * pour transmission manuelle. Le contrôle par l'adresse `@assemblee-nationale.fr`
+ * tient toujours — c'est là qu'on envoie le lien — et le député choisit
+ * lui-même son mot de passe.
  *
- * Réservé aux administrateurs — ouvrir un compte de connexion est un acte plus
- * sensible que rédiger un décryptage. La création réutilise la mécanique de
- * `app:utilisateur:creer` : rattachement à un député (donc ROLE_DEPUTE
- * exclusif, voir Utilisateur::getRoles), mot de passe haché par le vérifieur
- * `auto`.
+ * Réservé aux administrateurs : émettre un accès de connexion est un acte plus
+ * sensible que rédiger un décryptage.
  */
 #[Route('/admin/demandes-comptes')]
 #[IsGranted(Utilisateur::ROLE_ADMIN)]
@@ -40,7 +41,7 @@ class DemandeCompteController extends AbstractController
         private readonly EntityManagerInterface $entityManager,
         private readonly DemandeCompteDeputeRepository $demandes,
         private readonly UtilisateurRepository $utilisateurs,
-        private readonly UserPasswordHasherInterface $hacheur,
+        private readonly MailerInterface $courrielleur,
     ) {
     }
 
@@ -74,31 +75,24 @@ class DemandeCompteController extends AbstractController
             return $this->redirectToRoute('admin_demande_compte_index');
         }
 
-        $identifiant = $this->identifiantLibre($depute);
-        $motDePasse = $this->motDePasseProvisoire();
-
-        $utilisateur = new Utilisateur();
-        $utilisateur->setIdentifiant($identifiant);
-        $utilisateur->setNom($depute->getFirstname() . ' ' . $depute->getLastname());
-        $utilisateur->setEmail($demande->getEmail());
-        // Le rattachement au député porte le rôle : ROLE_DEPUTE, jamais la
-        // rédaction (Utilisateur::getRoles impose l'exclusion).
-        $utilisateur->setDepute($depute);
-        $utilisateur->setRoles([]);
-        $utilisateur->setPassword($this->hacheur->hashPassword($utilisateur, $motDePasse));
-
-        $this->entityManager->persist($utilisateur);
+        // On émet le jeton d'activation (l'ancien `users_mp_link`), le compte
+        // n'étant créé qu'au bout du lien, par le député lui-même.
+        $token = bin2hex(random_bytes(50));
+        $demande->setToken($token);
         $this->classer($demande, DemandeCompteDepute::APPROUVEE);
 
-        // Le mot de passe en clair n'est montré qu'ici, une fois : l'administrateur
-        // le transmet au député à son adresse institutionnelle, puis il disparaît.
+        $lien = $this->generateUrl('inscription_depute', ['token' => $token], UrlGeneratorInterface::ABSOLUTE_URL);
+        $this->envoyerLien($demande->getEmail(), $depute->getFirstname() . ' ' . $depute->getLastname(), $lien);
+
+        // On affiche le lien pour transmission manuelle : en local (MAILER_DSN
+        // null://) rien n'est envoyé, et même au déploiement l'administrateur
+        // garde le lien sous les yeux pour le confier à l'adresse de l'Assemblée.
         $this->addFlash('succes', sprintf(
-            'Compte ouvert pour %s %s. À transmettre à %s — identifiant : %s · mot de passe provisoire : %s. Ce mot de passe ne sera plus affiché.',
+            'Demande approuvée pour %s %s. Lien d\'activation à transmettre à %s : %s',
             $depute->getFirstname(),
             $depute->getLastname(),
             $demande->getEmail(),
-            $identifiant,
-            $motDePasse,
+            $lien,
         ));
 
         return $this->redirectToRoute('admin_demande_compte_index');
@@ -152,32 +146,18 @@ class DemandeCompteController extends AbstractController
         $this->entityManager->flush();
     }
 
-    /**
-     * Un identifiant de connexion libre, dérivé du slug du député (« julien-guibert »)
-     * et suffixé s'il est déjà pris.
-     */
-    private function identifiantLibre(Depute $depute): string
+    private function envoyerLien(string $adresse, string $nom, string $lien): void
     {
-        $base = $depute->getSlug()
-            ?: (new AsciiSlugger())->slug($depute->getFirstname() . ' ' . $depute->getLastname())->lower()->toString();
+        $courriel = (new Email())
+            ->from(new Address('info@datan.fr', 'Datan'))
+            ->to($adresse)
+            ->subject('Lien d\'activation pour créer un compte Datan')
+            ->text(sprintf(
+                "Bonjour %s,\n\nVotre demande de compte Datan a été acceptée. Suivez ce lien pour créer votre compte et choisir votre mot de passe :\n%s\n\nL'équipe de Datan",
+                $nom,
+                $lien,
+            ));
 
-        $identifiant = $base;
-        $suffixe = 1;
-
-        while ($this->utilisateurs->findOneBy(['identifiant' => $identifiant]) !== null) {
-            $identifiant = $base . '-' . (++$suffixe);
-        }
-
-        return $identifiant;
-    }
-
-    /**
-     * Mot de passe provisoire fort (72 bits), au-delà du minimum de 12 caractères
-     * qu'exige `app:utilisateur:creer`. Le député le changera — la page
-     * « mon compte » relève du chantier des comptes lecteurs, à venir.
-     */
-    private function motDePasseProvisoire(): string
-    {
-        return bin2hex(random_bytes(9));
+        $this->courrielleur->send($courriel);
     }
 }

@@ -53,6 +53,28 @@
           </div>
         {% endif %}
 
+        {% if ia_actif %}
+          {# Le brouillon pré-remplit les champs, rien de plus : la rédaction
+             relit, corrige et décide seule de la publication. #}
+          <div class="card">
+            <div class="card-body">
+              <h2 class="h6">Brouillon par IA</h2>
+              <p class="small text-muted mb-2">
+                Rédige un premier jet à partir du scrutin, du dossier et des débats
+                en séance ({{ ia_modele }}). Chaque citation est vérifiée contre le
+                compte rendu — relisez avant de publier.
+              </p>
+              <button type="button" id="bouton-brouillon-ia" class="btn btn-sm btn-outline-primary"
+                      data-url="{{ path('admin_decryptage_brouillon_ia') }}"
+                      data-token="{{ csrf_token('brouillon_ia') }}"
+                      {% if decryptage %}data-legislature="{{ decryptage.legislature }}" data-numero="{{ decryptage.voteNumero }}"{% endif %}>
+                Générer un brouillon
+              </button>
+              <div id="etat-brouillon-ia" class="small mt-2"></div>
+            </div>
+          </div>
+        {% endif %}
+
         <button type="submit" class="btn btn-primary btn-block">Enregistrer</button>
         <a class="btn btn-link btn-block" href="{{ path('admin_decryptage_index') }}">Revenir à la liste</a>
       </div>
@@ -71,4 +93,82 @@
     }
   </script>
   <script type="module" src="{{ asset('assets/js/dashboard/init-ckeditor.js') }}"></script>
+
+  {% if ia_actif %}
+    <script>
+      (function () {
+        var bouton = document.getElementById('bouton-brouillon-ia');
+        var etat = document.getElementById('etat-brouillon-ia');
+        if (!bouton) return;
+
+        bouton.addEventListener('click', function () {
+          // À la création, la législature et le numéro se lisent dans le
+          // formulaire ; à la modification, le scrutin est figé et porté par
+          // les attributs data du bouton.
+          var legislature = bouton.dataset.legislature
+            || (document.getElementById('decryptage_legislature') || {}).value;
+          var numero = bouton.dataset.numero
+            || (document.getElementById('decryptage_voteNumero') || {}).value;
+
+          if (!legislature || !numero) {
+            etat.innerHTML = '<span class="text-danger">Renseignez d\'abord la législature et le numéro du scrutin.</span>';
+            return;
+          }
+
+          var titre = document.getElementById('decryptage_title');
+          if ((titre.value.trim() !== '' || (window.editor && window.editor.getData().trim() !== ''))
+              && !window.confirm('Le brouillon remplacera le titre et le texte en cours. Continuer ?')) {
+            return;
+          }
+
+          bouton.disabled = true;
+          etat.innerHTML = '<span class="text-muted">Génération en cours… (parfois plusieurs minutes avec un modèle local)</span>';
+
+          fetch(bouton.dataset.url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ legislature: legislature, numero: numero, _token: bouton.dataset.token })
+          })
+            .then(function (reponse) { return reponse.json().then(function (json) { return { ok: reponse.ok, json: json }; }); })
+            .then(function (resultat) {
+              bouton.disabled = false;
+              if (!resultat.ok) {
+                etat.innerHTML = '<span class="text-danger"></span>';
+                etat.firstChild.textContent = resultat.json.erreur || 'Échec de la génération.';
+                return;
+              }
+
+              titre.value = resultat.json.titre;
+              if (window.editor) {
+                window.editor.setData(resultat.json.description);
+              }
+
+              var validation = resultat.json.validation;
+              var html = 'Brouillon posé dans le formulaire (' + resultat.json.paroles + ' interventions lues).';
+              if (validation.total > 0) {
+                html += '<br>Citations : ' + validation.valides + '/' + validation.total + ' retrouvées dans le compte rendu.';
+                if (validation.invalides > 0) {
+                  html += '<br><span class="text-danger">À vérifier avant publication :</span><ul class="mb-0 pl-3">';
+                  validation.citations.forEach(function (c) {
+                    if (!c.valide) {
+                      var li = document.createElement('li');
+                      li.textContent = '« ' + c.texte + ' »';
+                      html += li.outerHTML;
+                    }
+                  });
+                  html += '</ul>';
+                }
+              } else {
+                html += '<br>Aucune citation détectée — le texte doit en porter, vérifiez le brouillon.';
+              }
+              etat.innerHTML = html;
+            })
+            .catch(function () {
+              bouton.disabled = false;
+              etat.innerHTML = '<span class="text-danger">La requête a échoué — voyez la console et les journaux.</span>';
+            });
+        });
+      })();
+    </script>
+  {% endif %}
 {% endblock %}

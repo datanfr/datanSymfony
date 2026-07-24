@@ -69,6 +69,15 @@ class Amendement
     #[Groups(['amendement:read', 'amendement:write'])]
     private ?string $titreIa = null;
 
+    /**
+     * Simplicité de compréhension du vote, de 1 (très technique) à 5 (très
+     * accessible), estimée par le générateur de résumés (`amendements_ia
+     * .simplicite_ia` d'origine, que PoliticAnalysis renseignait).
+     */
+    #[ORM\Column(type: Types::SMALLINT, nullable: true)]
+    #[Groups(['amendement:read', 'amendement:write'])]
+    private ?int $simpliciteIa = null;
+
     /** Le résumé n'est affiché que s'il a été relu (amendements_ia.reviewed). */
     #[ORM\Column]
     #[Groups(['amendement:read', 'amendement:write', 'scrutin:read'])]
@@ -189,6 +198,18 @@ class Amendement
     public function setTitreIa(?string $titreIa): static
     {
         $this->titreIa = $titreIa;
+
+        return $this;
+    }
+
+    public function getSimpliciteIa(): ?int
+    {
+        return $this->simpliciteIa;
+    }
+
+    public function setSimpliciteIa(?int $simpliciteIa): static
+    {
+        $this->simpliciteIa = $simpliciteIa;
 
         return $this;
     }

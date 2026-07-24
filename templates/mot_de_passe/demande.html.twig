@@ -1,21 +1,17 @@
-<!-- Page de connexion, reprise de `views/users/login.php` : deux colonnes, le
-     formulaire à gauche sous le logo Datan, la photo du Palais Bourbon à
-     droite. Les classes `login_*` et `#container-always-fluid` viennent de
-     `main.css`, la feuille du site public. Servie à `/login`, l'adresse que les
-     liens du site attendent, un seul formulaire connecte lecteurs, rédaction et
-     députés.
+{# « Mot de passe oublié », reprise de `views/users/password-lost.php` : mêmes
+   deux colonnes que la connexion, formulaire à gauche. Document autonome, sans
+   barre de navigation (le legacy charge `header_no_navbar`).
 
-     Les liens vers l'inscription, le mot de passe oublié et la demande de
-     compte député sont rétablis : ces pages existent désormais (chantier des
-     comptes lecteurs). Le succès d'une inscription ou d'une réinitialisation
-     ramène ici, d'où le bandeau vert. -->
+   Écart assumé et commenté au contrôleur : un seul message, neutre, qu'un compte
+   existe ou non — le legacy distinguait « e-mail envoyé » et « nous ne trouvons
+   pas votre email », révélant qui a un compte (énumération). #}
 <!doctype html>
 <html lang="fr">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
-  <title>Se connecter | Datan</title>
+  <title>Réinitialisez votre mot de passe | Datan</title>
   <link rel="icon" type="image/png" href="{{ asset('assets/imgs/favicon/datan_favicon.ico') }}">
   <link rel="stylesheet" href="{{ asset('assets/css/main.css') }}">
   <link rel="stylesheet" href="//fonts.googleapis.com/css?family=Open+Sans:400,600,800">
@@ -36,7 +32,8 @@
           <div class="row mt-5">
             <div class="col-lg-8 col-md-10 col-10 offset-lg-2 offset-md-1 offset-1">
               <div class="row mt-5 d-flex flex-column justify-content-center login_form">
-                <h1 class="text-center my-4">Connectez-vous à votre compte</h1>
+                <h1 class="text-center my-4">Réinitialisez votre mot de passe</h1>
+                <p>Indiquez l'adresse avec laquelle vous êtes inscrit. Vous recevrez un courriel avec un lien permettant de créer un nouveau mot de passe.</p>
 
                 {% for message in app.flashes('succes') %}
                   <div class="alert alert-success mb-4 text-center" role="alert">{{ message }}</div>
@@ -45,25 +42,12 @@
                   <div class="alert alert-danger mb-4 text-center" role="alert">{{ message }}</div>
                 {% endfor %}
 
-                {% if erreur %}
-                  <div class="alert alert-danger mb-4 text-center" role="alert">
-                    L'identifiant ou le mot de passe sont erronés. Veuillez réessayer.
-                  </div>
-                {% endif %}
-
                 <div class="form-group">
-                  <input type="text" name="_username" value="{{ dernier_identifiant }}" class="form-control"
-                         placeholder="Pseudo ou Email" autocomplete="username" required autofocus>
+                  <input type="email" name="email" class="form-control" placeholder="Email" required autofocus>
                 </div>
-                <div class="form-group">
-                  <input type="password" name="_password" class="form-control"
-                         placeholder="Mot de passe" autocomplete="current-password" required>
-                </div>
-                <input type="hidden" name="_csrf_token" value="{{ csrf_token('authenticate') }}">
-                <button type="submit" class="btn btn-primary btn-block">Se connecter</button>
-                <a class="mt-4" href="{{ path('mot_de_passe_oubli') }}">Mot de passe oublié ?</a>
-                <p class="mt-4">Pas encore de compte sur Datan ? <a href="{{ path('inscription') }}">Inscrivez-vous</a></p>
-                <p>Vous êtes député et n'avez pas encore de compte Datan ? <a href="{{ path('demande_compte_depute') }}">Demandez-le !</a></p>
+                <input type="hidden" name="_token" value="{{ csrf_token('mot_de_passe_oubli') }}">
+                <button type="submit" class="btn btn-primary btn-block">Valider</button>
+                <p class="mt-4"><a href="{{ path('connexion') }}">Retour à la connexion</a></p>
               </div>
             </div>
             <div class="col-lg-8 col-md-10 col-10 offset-lg-2 offset-md-1 offset-1 login_credits pt-3 mt-4">

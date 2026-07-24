@@ -6,10 +6,12 @@ use App\Entity\Decryptage;
 use App\Entity\Utilisateur;
 use App\Enum\DecryptageState;
 use App\Form\DecryptageType;
+use App\Ia\GenerateurBrouillon;
 use App\Repository\DecryptageRepository;
 use App\Repository\ScrutinRepository;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
+use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Attribute\Route;
@@ -33,6 +35,7 @@ class DecryptageController extends AbstractController
         private readonly EntityManagerInterface $entityManager,
         private readonly DecryptageRepository $decryptages,
         private readonly ScrutinRepository $scrutins,
+        private readonly GenerateurBrouillon $generateur,
     ) {
     }
 
@@ -55,6 +58,16 @@ class DecryptageController extends AbstractController
     {
         $decryptage = new Decryptage();
         $decryptage->setState(DecryptageState::Draft);
+
+        // Arrivée depuis l'écran des amendements (« Décrypter ») : le scrutin
+        // est déjà connu, on le pose dans le formulaire. Le legacy envoyait ce
+        // bouton vers PoliticAnalysis, service externe désormais internalisé.
+        if ($request->query->getInt('legislature') > 0) {
+            $decryptage->setLegislature($request->query->getInt('legislature'));
+        }
+        if ($request->query->getInt('numero') > 0) {
+            $decryptage->setVoteNumero($request->query->getInt('numero'));
+        }
 
         $formulaire = $this->createForm(DecryptageType::class, $decryptage, [
             'creation' => true,
@@ -109,7 +122,56 @@ class DecryptageController extends AbstractController
         return $this->render('admin/decryptage/form.html.twig', [
             'formulaire' => $formulaire,
             'decryptage' => null,
+            'ia_actif' => $this->generateur->estActif(),
+            'ia_modele' => $this->generateur->modele(),
         ]);
+    }
+
+    /**
+     * Génère un brouillon par IA pour pré-remplir le formulaire.
+     *
+     * Le brouillon ne touche pas à la base : il revient au navigateur, qui le
+     * verse dans les champs, et c'est la rédaction qui enregistre — ou pas.
+     * Jamais de publication automatique : le décryptage est la seule donnée
+     * que Datan produit au lieu de la recevoir.
+     */
+    #[Route('/brouillon-ia', name: 'admin_decryptage_brouillon_ia', methods: ['POST'])]
+    public function brouillonIa(Request $request): JsonResponse
+    {
+        if (!$this->generateur->estActif()) {
+            return new JsonResponse(['erreur' => 'Aucun modèle configuré (IA_MODELE).'], Response::HTTP_NOT_FOUND);
+        }
+
+        $corps = json_decode($request->getContent(), true) ?: [];
+
+        if (!$this->isCsrfTokenValid('brouillon_ia', (string) ($corps['_token'] ?? ''))) {
+            return new JsonResponse(['erreur' => 'Jeton de sécurité invalide, rechargez la page.'], Response::HTTP_FORBIDDEN);
+        }
+
+        $legislature = (int) ($corps['legislature'] ?? 0);
+        $numero = (int) ($corps['numero'] ?? 0);
+
+        if ($legislature <= 0 || $numero <= 0) {
+            return new JsonResponse(['erreur' => 'Renseignez la législature et le numéro du scrutin.'], Response::HTTP_BAD_REQUEST);
+        }
+
+        $scrutin = $this->scrutins->findOneBy(['legislature' => $legislature, 'numero' => $numero]);
+        if ($scrutin === null) {
+            return new JsonResponse(['erreur' => sprintf('Aucun scrutin n° %d en %de législature.', $numero, $legislature)], Response::HTTP_NOT_FOUND);
+        }
+
+        // Une génération locale (Ollama) peut durer plusieurs minutes : ne pas
+        // laisser le max_execution_time de PHP couper la requête avant elle.
+        set_time_limit(320);
+
+        $brouillon = $this->generateur->generer($legislature, $numero);
+        if ($brouillon === null) {
+            return new JsonResponse([
+                'erreur' => sprintf('Le moteur (%s) n\'a pas rendu de brouillon — détail dans les journaux.', $this->generateur->modele()),
+            ], Response::HTTP_BAD_GATEWAY);
+        }
+
+        return new JsonResponse($brouillon);
     }
 
     #[Route('/{id}/modifier', name: 'admin_decryptage_modifier', requirements: ['id' => '\d+'], methods: ['GET', 'POST'])]
@@ -141,6 +203,8 @@ class DecryptageController extends AbstractController
         return $this->render('admin/decryptage/form.html.twig', [
             'formulaire' => $formulaire,
             'decryptage' => $decryptage,
+            'ia_actif' => $this->generateur->estActif(),
+            'ia_modele' => $this->generateur->modele(),
         ]);
     }
 

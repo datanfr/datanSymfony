@@ -43,6 +43,19 @@ aujourd'hui.
       `depute/legislature.html.twig` cite désormais les mandats pré-14e **sans
       les lier** (il fabriquait des liens morts vers ce que la garde ferme).
 
+- [ ] **Les fiches des Français de l'étranger vivent à la mauvaise adresse.**
+      Découvert le 25 juillet en portant les redirections du `.htaccess` : la
+      redirection canonique de `DeputeController::individual()` (et le plan de
+      députés, et tout lien interne) suit `depute.dpt_slug` — le slug
+      **fabriqué** (nom + code), qui pour les Français de l'étranger donne
+      `francais-etablis-hors-de-france-099` quand datan.fr sert
+      `francais-de-letranger` (la cible Yadan du `.htaccess` le prouve). Le
+      piège des « deux jeux de slugs » de CLAUDE.md : cinq départements
+      divergent, leurs députés sont donc indexés chez nous à des adresses que
+      le site vivant n'a jamais servies. À corriger en dérivant `dpt_slug` de
+      `departement.slug` (la table du legacy) quand le code y figure — puis
+      revérifier fiches, plans et sitemap. Confié à l'agent de la fiche député.
+
 ## 2. Référencement
 
 **Chantier livré le 23 juillet.** Le mécanisme vit dans `base.html.twig` (qui
@@ -88,6 +101,21 @@ Détail des quatre points, tous vérifiés côte à côte avec datan.fr :
       vraie adresse, là où le legacy écrit `/parrainages` (404). Le simulateur de
       coalition n'en a pas, le contrôleur d'origine n'en produisant pas. Aucune de
       ces pages n'a de carte Open Graph dédiée (logo générique, comme le legacy).
+- [x] **Redirections 301 du `.htaccess`** — **portées le 25 juillet**
+      (`RedirectionLegacyController`). Le legacy ne tient pas tout son contrat
+      d'URL dans `routes.php` : `.htaccess.dist:24-60` porte les adresses
+      d'avant la mise en législatures (2022), indexées depuis des années —
+      `votes/vote_N` et `votes/all…` → `legislature-15`, les 17 adresses
+      courtes de groupes (`/groupes/soc`…, énumération en contrainte de route
+      pour ne pas avaler `legislature-N`), trois députés déménagés (Sas,
+      Lucas-Lundy, Yadan — `priority: 2`, sinon `depute_individual` les avale),
+      les votes filtrés (`…/votes/{champ}` → `/votes`, lookahead qui épargne
+      le vrai `/votes/all` des groupes), `dashboard-mp` → `dashboard` (le
+      motif du pare-feu resserré en `^/dashboard(/|$)`, sans quoi il capturait
+      l'ancienne adresse avant le 301). Slash final : Symfony le retire
+      nativement en 301 ; doubles slashes (hook `urlValidator`) : aucune route
+      ne les accepte, 404 naturel. Tout vérifié en prod, y compris les
+      non-captures (vraies pages en 200).
 - [x] **Page 404** : `templates/bundles/TwigBundle/Exception/error404.html.twig`.
       Attention, la description qui figurait ici était fausse — le
       `404_override` « errors/page_missing » du legacy est **commenté** dans
@@ -370,12 +398,96 @@ Rien n'est porté au-delà de `/connexion` et de `/admin/decryptages`.
       franchement au lieu d'un tableau vide.
     - *Comptes X des députés* : les réseaux sociaux sont une donnée que Datan
       tient à la main, pas encore importée (cf. plus haut) — même traitement.
-  - **Laissé de côté sciemment :** `admin/amendements` et `admin/exposes` (liés
-    au chantier amendements/IA, non porté) ; `admin/votes` (c'est le CRUD des
-    décryptages, déjà sous `/admin/decryptages`) ; `admin/api-keys` (notre API
-    est API Platform, l'ancien système de clés ne s'applique pas — à trancher) ;
-    `admin/elections/*` (fenêtre de candidatures close depuis 2022) ; le CRUD du
-    blog (`posts/create`), hors de cette mission.
+  - **Laissé de côté sciemment :** `admin/votes` (c'est le CRUD des décryptages,
+    déjà sous `/admin/decryptages`) ; `admin/api-keys` — **tranché le 24 juillet :
+    caduc.** Le seul client de l'API à clés du legacy était PoliticAnalysis, le
+    service externe qui générait les décryptages IA et les résumés d'amendements ;
+    cette génération est désormais interne (cf. le brouillon par IA ci-dessous),
+    il n'y a plus de client à authentifier ; `admin/elections/*` (fenêtre de
+    candidatures close depuis 2022).
+- [x] **Relecture des amendements et CRUD du blog** (`Admin::amendements`,
+      contrôleur `Posts`) — **portés le 24 juillet.**
+  - **`/admin/amendements`** (`AmendementController`) : la file des votes sur
+    amendement de la législature en cours **non encore décryptés**, où la
+    rédaction relit le titre et le résumé IA puis coche « relu ». Filtres
+    période / dates / « masquer les relus » repris du legacy ; disparité et
+    intérêt **calculés en SQL** à l'identique (`daily.php`). La case « relu »
+    bascule `amendement.resume_relu` par un **POST + jeton CSRF** (l'AJAX du
+    legacy `admin/amendements/review`), écriture par l'ORM. Le bouton
+    « Décrypter », qui ouvrait le service externe PoliticAnalysis
+    (`{PA_URL}/scrutins/{uid}/decryptage`), pointe désormais l'écran interne
+    `/admin/decryptages/nouveau?legislature=&numero=`. Accès rédacteur **et**
+    administrateur (le `security_only_team` du legacy), sans garde plus fine.
+    - **Écart de schéma assumé :** le socle IA du legacy vivait dans une table
+      `amendements_ia` clée sur le vote (`legislature`, `voteNumero`) ; chez nous
+      résumé et drapeau vivent sur l'amendement (`resume_ia`, `titre_ia`,
+      `resume_relu`), qu'un scrutin désigne par `amendement_id`.
+    - **Note de simplicité (`simplicite_ia`) absente de notre schéma** : la
+      colonne « Simplicité » est affichée **vide (« — »), pas inventée** — à
+      ajouter le jour où la génération IA la produit (le legacy la rend en étoiles
+      1–5).
+  - **`/admin/blog`** (`Admin\BlogController`, distinct du `BlogController`
+    public) : liste (brouillons compris), création, modification, suppression.
+    Corps en HTML éditorial (CKEditor `#editor`, rendu `|raw`, comme la FAQ).
+    Règles de rôle **alignées sur les décryptages** : création en brouillon,
+    reprise d'un contenu publié et suppression réservées à l'administrateur — plus
+    strict que le legacy (qui laissait un rédacteur rouvrir un publié sans pouvoir
+    en changer l'état, ce qui le remettait à NULL, un défaut), mais uniforme avec
+    le reste du back-office.
+  - **`admin/exposes` : analysé, non porté (remplacé de fait).** L'écran du legacy
+    n'éditait qu'une colonne, `exposes.exposeSummaryPublished` — la version relue
+    de l'exposé des motifs, à côté de l'original (`exposeOriginal`) et d'un résumé
+    OpenAI (`exposeSummary`). Or dès la 17e législature le legacy ne lit plus cette
+    table : il **reconstruit** le texte depuis `amendements_ia`
+    (`resume_ia` + `justification_ia`). Chez nous il n'y a pas de table `exposes`,
+    et le résumé éditorial d'un amendement vit sur `amendement.resume_ia`, relu via
+    l'écran des amendements ci-dessus — l'exposé publié y est donc déjà couvert.
+    Rien à porter tant qu'on ne réintroduit pas la distinction original / résumé
+    OpenAI / version publiée (et `justification_ia` n'existe pas encore chez nous).
+- [x] **Brouillon de décryptage par IA** (`/admin/decryptages`) — **livré le
+      24 juillet.** Refait en interne à partir de PoliticAnalysis et d'alinea
+      (dépôts de référence clonés dans `../PoliticAnalysis` et `../alinea`),
+      pour ne plus dépendre d'un service externe. L'essentiel : le brouillon
+      s'appuie sur **les morceaux de discours tenus en séance** autour du vote.
+      - Corpus des débats : dépôt Tricoteuses `Comptes_Rendus_Seances_XVII_nettoye`
+        (`comptes-rendus` au Catalogue), importé par `app:import:comptes-rendus`
+        (601 séances, 30 905 sections, 263 808 paroles ; 10e étape du sync
+        quotidien). Tables `compte_rendu`, `cr_section`, `cr_parole` ; liens de
+        hiérarchie par `ordre_absolu_seance`, pas par id (insertion par lots).
+        Le lien vote → débat passe par `scrutin.seance_ref` (8 434/8 434 en
+        L17, 18 séances sans CR : publication différée de quelques jours).
+      - Services `App\Ia` : `CollecteurDecryptage` (ancrage de la discussion par
+        la parole « Voici le résultat du scrutin » matchée sur les chiffres,
+        section sœur précédente incluse — la discussion générale des séances
+        antérieures est un choix de périmètre non couvert) ; `GenerateurBrouillon`
+        (deux moteurs par `IA_MODELE` : `claude-*` → API Anthropic, SDK officiel,
+        sinon Ollama local `OLLAMA_URL` ; sortie contrainte par schéma JSON) ;
+        `ValidateurCitations` (chaque citation « … » vérifiée contre le compte
+        rendu : exacte / bigramme / recouvrement 60 %).
+      - Bouton « Générer un brouillon » dans le formulaire (visible seulement si
+        `IA_MODELE` est posé) : pré-remplit titre et CKEditor, affiche le rapport
+        de citations. **Jamais de publication automatique** — le décryptage est
+        la seule donnée que Datan produit, l'IA propose, la rédaction dispose.
+      - Vérifié bout en bout le 24 juillet (gemma4 local, scrutin 8372) :
+        endpoint 200 en ~20 s, 403 sans jeton, 302 anonyme, bouton absent sans
+        modèle ; 7 citations sur 8 retrouvées mot pour mot, la 8e signalée à la
+        relecture — c'est le rôle du validateur.
+      - **Résumés d'amendements branchés le 24 juillet** sur le même moteur
+        (`App\Ia\MoteurIa`, extrait pour être partagé) : commande
+        `app:ia:resumes-amendements` (titre_ia, resume_ia, simplicite_ia —
+        colonne ajoutée, migration `Version20260724180000`). Ne touche jamais
+        un résumé existant, `resume_relu` reste à la rédaction, **hors du sync
+        quotidien** : chaque exécution appelle un modèle, on la lance sciemment.
+        L'ancienne boucle PoliticAnalysis (`/api/amendements_ia`) n'a plus lieu
+        d'être. `/admin/decryptages/nouveau?legislature=&numero=` pré-remplit le
+        formulaire — la cible du bouton « Décrypter » de l'écran amendements.
+        Vérifié en réel (gemma4, 2 résumés générés, relu=0). Piège consigné
+        dans `MoteurIa` : les modèles Ollama à réflexion consomment leur budget
+        `num_predict` en raisonnement AVANT la réponse — sans marge, contenu
+        vide (`done_reason: length`).
+      - **Reste :** choisir le modèle de production (`IA_MODELE` dans
+        `.env.local` : `gemma4:latest` testé, `claude-haiku-4-5` dès qu'une
+        `ANTHROPIC_API_KEY` est posée).
 - [x] **Espace député** (`/dashboard`) — **porté le 22 juillet.** Un député
       connecté y rédige, publie, reprend et supprime ses explications de vote,
       aux adresses du legacy (`explications/create/l{n}v{n}` et ses jumelles).
@@ -418,22 +530,26 @@ Rien n'est porté au-delà de `/connexion` et de `/admin/decryptages`.
       du déploiement) et `/register` appartient aux comptes lecteurs : la demande
       devient une **ligne en attente** qu'un administrateur relit et approuve —
       c'est lui qui transmet les identifiants à l'adresse institutionnelle, le
-      contrôle par l'adresse s'y reporte plutôt que de se perdre. L'approbation
-      ouvre le compte en réutilisant la mécanique d'`app:utilisateur:creer`
-      (rattachement `depute` ⇒ `ROLE_DEPUTE` exclusif, mot de passe provisoire
-      fort haché, montré une seule fois pour transmission). **Anti-abus** : le
+      contrôle par l'adresse s'y reporte plutôt que de se perdre. **Depuis le
+      portage des comptes lecteurs (24 juillet), l'approbation n'ouvre plus le
+      compte directement** : elle émet le jeton d'activation — l'ancien
+      `users_mp_link`, désormais porté par `demande_compte_depute.token` — et le
+      lien `/register/{token}` par lequel le député crée lui-même son compte et
+      choisit son mot de passe (le self-service du legacy restitué, mais en aval
+      de la relecture ; plus de mot de passe provisoire à transmettre). Le lien
+      part à l'adresse institutionnelle (MAILER_DSN, `null://` en local) et
+      s'affiche à l'administrateur pour transmission manuelle. **Anti-abus** : le
       captcha du legacy n'est pas porté (pile anti-spam de déploiement) ; le
       contrôle de l'adresse, un verrou « une demande par député » et la relecture
       humaine le remplacent. **Prouvé en prod** (serveur unique) : adresse
       inconnue → refus, format invalide → refus, député avec compte → « déjà un
       compte », député sans compte → demande créée, seconde saisie → verrou,
-      approbation → compte `ROLE_DEPUTE` qui se connecte et atterrit sur
-      `/dashboard`. **À câbler par Rémi** : l'entrée de menu vers
-      `/admin/demandes-comptes` depuis la barre latérale de la rédaction. Elle
-      vivrait dans `admin/base.html.twig` (coque partagée), et la page des
-      décryptages — d'où partirait le lien — m'était interdite : l'écran est en
-      place, gréé et navigable, seule son entrée depuis les décryptages reste à
-      poser (un `<li>` gardé `ROLE_ADMIN`).
+      approbation → jeton émis, `/register/{token}` → compte `ROLE_DEPUTE` qui se
+      connecte et atterrit sur `/dashboard`, jeton à usage unique annulé après
+      création. L'entrée de menu vers `/admin/demandes-comptes` (un `<li>`
+      gardé `ROLE_ADMIN` dans la coque `admin/base.html.twig`) a été posée à
+      l'intégration, le 24 juillet — la coque était alors sous la main d'un
+      autre agent, d'où le passage de relais.
 - [x] **Récupération des comptes du legacy** — commande `app:import:utilisateurs`
       (23 juillet). **Le mot de passe de l'ancienne base fonctionne sur la
       nouvelle** : le legacy hache en `password_hash(PASSWORD_DEFAULT)`, du bcrypt
@@ -452,17 +568,39 @@ Rien n'est porté au-delà de `/connexion` et de `/admin/decryptages`.
       comptes le jour du déploiement.
 - [x] **Page de connexion** — remise en parité le 23 juillet : deux colonnes,
       logo Datan, fond Palais Bourbon (`main.css`), au lieu de la carte AdminLTE
-      générique. Écart assumé : ni onglet « S'inscrire », ni « Mot de passe
-      oublié », ni « Demandez un compte député », ces pages n'existant pas encore
-      (elles répondraient 404). Connexion par identifiant **ou** e-mail, comme le
-      legacy. Le fond du Palais Bourbon est un lien externe vers Wikimedia,
-      hérité du legacy — dépendance à héberger un jour en propre.
-- [ ] **Comptes lecteurs** : `/mon-compte`, `/login`, `/register`, `/password`.
-      (`/demande-compte-depute` en a été retiré : ce n'est pas une page de
-      lecteur mais la demande de compte d'un député, portée ci-dessus.) Le lien
-      « Connexion » du pied de page vise
-      `/login` (l'entrée des lecteurs), pas notre `/connexion` : il reste mort
-      tant que cette page n'existe pas.
+      générique. **Servie désormais à `/login`** (l'adresse qu'attendent les liens
+      du site ; `/connexion`, l'adresse du portage, y redirige en 301) depuis le
+      chantier des comptes lecteurs — un seul formulaire connecte lecteurs,
+      rédaction et députés. Les liens « S'inscrire », « Mot de passe oublié » et
+      « Demandez un compte député » sont rétablis, ces pages existant désormais.
+      Connexion par identifiant **ou** e-mail, comme le legacy. Le fond du Palais
+      Bourbon est un lien externe vers Wikimedia, hérité du legacy — dépendance à
+      héberger un jour en propre.
+- [x] **Comptes lecteurs** — **portés le 24 juillet.** `/login` (l'adresse du
+      site, `/connexion` y redirige en 301), `/register` (+ `/register/{token}`),
+      `/password` (+ `/password/{token}`), `/mon-compte` (+ données, mot de passe,
+      suppression). **Le piège des rôles** : un lecteur n'a ni député ni rôle, et
+      `getRoles()` retombait alors sur `ROLE_REDACTEUR` — il aurait ouvert la
+      rédaction. Correction : un lecteur porte `ROLE_LECTEUR` **explicitement**,
+      et `getRoles()` en fait la garde (l'exclusion est écrite, pas confiée aux
+      données, comme pour le député). **Prouvé en prod** (serveur unique) : un
+      lecteur connecté n'obtient jamais 200 sur `/admin/*` ni `/dashboard` (403),
+      seulement sur `/mon-compte`, et atterrit sur l'accueil ; un rédacteur à
+      `roles=[]` garde bien `ROLE_REDACTEUR` (le repli est intact). Chaque flux
+      vérifié : inscription (six saisies invalides refusées en 422), connexion des
+      trois familles à leur page d'arrivée, réinitialisation (jeton 1 h, usage
+      unique, envoi MAILER_DSN `null://`), changement et suppression de compte.
+      **Écarts corrigés et commentés** : l'énumération de comptes sur `/password`
+      (message neutre, qu'un compte existe ou non) ; la suppression par simple
+      lien GET (POST + CSRF) ; le jeton de réinitialisation réutilisable (usage
+      unique) ; un plancher de mot de passe (8 caractères, le legacy n'en avait
+      aucun pour les lecteurs). `/register/{token}` (activation d'un député) est
+      branché sur `demande_compte_depute` (cf. bullet ci-dessus). **Laissé au
+      déploiement** : le captcha et la pénalité anti-force-brute (pile anti-spam),
+      le transport Mailjet réel. Le lien « Connexion » du pied de page de
+      `base.html.twig` a été **câblé à l'intégration le 24 juillet** (clair sur
+      l'accueil, obfusqué ailleurs, comme ses voisins) ; « Mon compte » est
+      entré au menu de la rédaction (`admin/base.html.twig`) au même moment.
 - [x] **Inscription à la newsletter** — **portée le 24 juillet** : page
       `/newsletter`, endpoint `POST /api/newsletter/create_newsletter` (adresse
       que `main.min.js` porte en dur — exception déclarée dans
@@ -526,10 +664,12 @@ qui écrit, un rédacteur qui publie), ne pas le rejouer sans y penser, il
 
 ## 5. Ornements du gabarit
 
-- [ ] **1 lien mort restant dans `base.html.twig`** (`href="#"`) :
-      « Connexion » (pied de page), qui vise `/login` (comptes lecteurs, §4) et
-      **non** notre `/connexion` — la note qui figurait ici était fausse, le
-      legacy ne connaît pas `/connexion`. Tous les autres sont câblés depuis le
+- [x] **Plus aucun lien mort dans `base.html.twig`** — « Connexion » (pied de
+      page), le dernier, a été câblé le 24 juillet à la livraison des comptes
+      lecteurs : `path('connexion')` (soit `/login`), en clair sur l'accueil et
+      obfusqué ailleurs comme ses voisins (vérifié : `sdfghj/ybtva` = `/login`
+      en ROT13). Tous
+      les autres sont câblés depuis le
       24 juillet : « S'inscrire à la newsletter » (nav, avec son icône),
       « Élections » (nav), « Newsletter » (pied de page), puis « Simulateur
       coalition » (nav), « Simulateur Assemblée » et « Parrainages 2022 » (pied
@@ -565,10 +705,26 @@ qui écrit, un rédacteur qui publie), ne pas le rejouer sans y penser, il
   confiance de septembre 2025). C'est un mécanisme d'annonce ponctuel,
   aujourd'hui éteint à la source — le rétablir serait un choix éditorial, pas
   un portage.
-- [ ] **Modale de dons** (`donationModal`, footer.php) : ouverte après 10 pages
-      vues dans le mois, compteur tenu en cookie par un service tarteaucitron
-      maison soumis à consentement. Indissociable de la pile cookies (Tarte au
-      citron + GTM), donc du chantier cookies/mentions légales au déploiement.
+- [x] **Modale de dons et pile de suivi** — **portées le 25 juillet**, le
+      classement « au déploiement » était une erreur d'inventaire : datan.fr
+      sert tout cela sur chaque page. Dans `base.html.twig` :
+      - **tarteaucitron** (même version épinglée du CDN, `footer.php:230-345`),
+        toujours servi ; il pilote GTM et le service maison « datantracking »
+        (compteur mensuel de pages en cookie → `partials/modale_don.html.twig`
+        au seuil de 10 pages, au plus une fois par semaine). Correction : le
+        « readmoreLink » de l'origine pointe `/cookiespolicy`, une adresse qui
+        n'a **jamais existé** (404 depuis toujours) → mentions légales.
+      - **Matomo** (hors consentement, config exemptée CNIL, traceur renommé
+        `1337.js` anti-bloqueurs) derrière `MATOMO_URL`, **GTM** derrière
+        `GTM_ID` — vides par défaut : un poste de développement ne pollue
+        jamais les statistiques ; en production `MATOMO_URL=https://matomo.datan.fr`
+        (serveur vérifié vivant) et `GTM_ID=GTM-K3QQNK2`. Vestiges NON repris,
+        commentés : l'`onload="embedTracker()"` (fonction introuvable partout —
+        ReferenceError silencieuse sur chaque page du vivant) et le compteur
+        `#monthly-pages-visited-count` (aucun élément HTML ne le porte nulle
+        part). Le pistage reste absent de l'iframe embarquée (choix consigné).
+      - Vérifié en prod : bannière + modale présentes, Matomo/GTM absents à
+        vide et présents une fois les variables posées.
 
 ## 6. Points de vigilance sur l'existant
 
@@ -627,3 +783,17 @@ qui écrit, un rédacteur qui publie), ne pas le rejouer sans y penser, il
   suivantes. Le symptôme est exactement celui d'un `cache:clear` concurrent
   décrit dans `CLAUDE.md`, et plusieurs serveurs de développement tournaient. À
   rouvrir si cela se reproduit sans cette circonstance.
+- **Balayage hors-routes du legacy (25 juillet)** — ce que `routes.php` ne dit
+  pas et qui reste à la charge du déploiement ou d'un chantier dédié :
+  - **`scripts/daily.php` publie des jeux CSV sur data.gouv.fr**
+    (`opendata()`, téléversement par l'API) — ce sont les jeux que notre pied
+    de page pointe. Publication à replanifier au déploiement, hors de
+    `app:sync:quotidien`.
+  - **`daily.php` moissonne aussi les comptes Bluesky** (`addBsky()`) — versé
+    au chantier réseaux sociaux.
+  - Courriels : le legacy compose en **MJML** (`qferr/mjml-php`) et envoie par
+    **Mailjet** — newsletter mensuelle et transactionnels, au déploiement.
+  - `pfaciana/tiny-html-minifier` est au composer du legacy mais **introuvable
+    à l'usage** (ni hook ni core) : rien à porter.
+  - Hooks : `ssl.php` (redirection https, niveau serveur au déploiement),
+    `urlValidator` et `generalModal` déjà traités.

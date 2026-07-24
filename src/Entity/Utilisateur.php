@@ -9,7 +9,7 @@ use Symfony\Component\Security\Core\User\PasswordAuthenticatedUserInterface;
 use Symfony\Component\Security\Core\User\UserInterface;
 
 /**
- * Compte de connexion : soit un membre de la rédaction, soit un député.
+ * Compte de connexion : membre de la rédaction, député, ou simple lecteur.
  *
  * Côté rédaction, deux rôles suffisent, repris de l'application d'origine qui
  * distinguait le `type` « admin » des autres comptes : un rédacteur écrit et
@@ -20,6 +20,11 @@ use Symfony\Component\Security\Core\User\UserInterface;
  * son propre espace. L'application d'origine le marquait du `type` « mp » et
  * gardait l'identifiant du député à côté, dans la session
  * (`DashboardMP::__construct`).
+ *
+ * Un lecteur (le `type` vide de l'origine) n'a accès qu'à son compte : ni
+ * rédaction, ni espace député. Il porte ROLE_LECTEUR **explicitement** —
+ * getRoles() en fait la garde, car sans elle un compte sans député ni rôle
+ * retomberait sur ROLE_REDACTEUR et ouvrirait la rédaction à un lecteur.
  */
 #[ORM\Entity(repositoryClass: UtilisateurRepository::class)]
 #[ORM\Table(name: 'utilisateur')]
@@ -29,6 +34,7 @@ class Utilisateur implements UserInterface, PasswordAuthenticatedUserInterface
     public const ROLE_REDACTEUR = 'ROLE_REDACTEUR';
     public const ROLE_ADMIN = 'ROLE_ADMIN';
     public const ROLE_DEPUTE = 'ROLE_DEPUTE';
+    public const ROLE_LECTEUR = 'ROLE_LECTEUR';
 
     #[ORM\Id]
     #[ORM\GeneratedValue]
@@ -45,6 +51,14 @@ class Utilisateur implements UserInterface, PasswordAuthenticatedUserInterface
 
     #[ORM\Column(length: 255, nullable: true)]
     private ?string $email = null;
+
+    /**
+     * Code postal du lecteur, repris du champ `zipcode` de la table `users` de
+     * l'origine (collecté à l'inscription, modifiable dans « mon compte »). Nul
+     * pour la rédaction et les députés, qui ne le renseignent pas.
+     */
+    #[ORM\Column(length: 10, nullable: true)]
+    private ?string $codePostal = null;
 
     /**
      * Député dont ce compte est l'espace personnel.
@@ -125,7 +139,7 @@ class Utilisateur implements UserInterface, PasswordAuthenticatedUserInterface
     }
 
     /**
-     * Rôles du compte, les deux familles étant exclusives l'une de l'autre.
+     * Rôles du compte, les trois familles étant exclusives l'une de l'autre.
      *
      * Un compte rattaché à un député ne reçoit que ROLE_DEPUTE, quoi que porte
      * sa colonne `roles` : l'application d'origine n'avait qu'un `type`, et un
@@ -133,12 +147,22 @@ class Utilisateur implements UserInterface, PasswordAuthenticatedUserInterface
      * plutôt que de faire confiance aux données évite qu'une ligne mal saisie
      * n'ouvre la rédaction à un élu.
      *
+     * Un lecteur porte ROLE_LECTEUR et **rien d'autre** : sans cette garde, un
+     * compte sans député et à `roles` vide — exactement ce qu'est un lecteur —
+     * se verrait ajouter ROLE_REDACTEUR par le repli ci-dessous et entrerait
+     * dans la rédaction. C'est le piège que la mission des comptes lecteurs
+     * signalait ; l'exclusion est écrite ici, pas confiée aux données.
+     *
      * @return list<string>
      */
     public function getRoles(): array
     {
         if ($this->depute !== null) {
             return [self::ROLE_DEPUTE];
+        }
+
+        if (\in_array(self::ROLE_LECTEUR, $this->roles, true)) {
+            return [self::ROLE_LECTEUR];
         }
 
         $roles = $this->roles;
@@ -165,6 +189,23 @@ class Utilisateur implements UserInterface, PasswordAuthenticatedUserInterface
     public function estDepute(): bool
     {
         return $this->depute !== null;
+    }
+
+    public function estLecteur(): bool
+    {
+        return $this->depute === null && \in_array(self::ROLE_LECTEUR, $this->roles, true);
+    }
+
+    public function getCodePostal(): ?string
+    {
+        return $this->codePostal;
+    }
+
+    public function setCodePostal(?string $codePostal): static
+    {
+        $this->codePostal = $codePostal;
+
+        return $this;
     }
 
     public function getDepute(): ?Depute

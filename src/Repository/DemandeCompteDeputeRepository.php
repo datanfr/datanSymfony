@@ -29,6 +29,16 @@ class DemandeCompteDeputeRepository extends ServiceEntityRepository
     }
 
     /**
+     * La demande approuvée que porte un jeton d'activation, s'il est encore
+     * valable. C'est ce que résout `/register/{token}` : approuvée (donc relue
+     * par un administrateur) et non consommée (le jeton n'est pas remis à nul).
+     */
+    public function parToken(string $token): ?DemandeCompteDepute
+    {
+        return $this->findOneBy(['token' => $token, 'etat' => DemandeCompteDepute::APPROUVEE]);
+    }
+
+    /**
      * Les demandes à traiter, la plus ancienne d'abord.
      *
      * @return list<DemandeCompteDepute>

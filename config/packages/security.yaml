@@ -34,10 +34,16 @@ security:
                 target: home
 
     access_control:
-        # La page de connexion doit rester ouverte, sans quoi elle se redirige
-        # sur elle-même.
-        - { path: ^/connexion$, roles: PUBLIC_ACCESS }
+        # La page de connexion, servie à /login (l'adresse qu'attendent les liens
+        # du site), doit rester ouverte, sans quoi elle se redirige sur elle-même.
+        # /register, /password et l'ancien /connexion (301 vers /login) restent
+        # publics d'office : aucune règle ci-dessous ne les attrape.
+        - { path: ^/login$, roles: PUBLIC_ACCESS }
         - { path: ^/apres-connexion$, roles: IS_AUTHENTICATED_FULLY }
+        # « Mon compte » est ouvert aux trois familles de comptes — lecteur,
+        # rédaction, député — d'où IS_AUTHENTICATED_FULLY et non un rôle : la
+        # seule exigence est d'être connecté.
+        - { path: ^/mon-compte, roles: IS_AUTHENTICATED_FULLY }
         # Seul POST public sous /api : ce n'est pas API Platform mais l'adresse
         # historique de l'inscription à la newsletter, que `main.min.js` (repris
         # tel quel du site) porte en dur. L'exception se déclare avant le filet
@@ -59,7 +65,11 @@ security:
         # L'espace où un député rédige ses explications de vote. ROLE_DEPUTE
         # n'échoit qu'aux comptes rattachés à un député : un administrateur
         # n'entre pas ici, et n'y aurait d'ailleurs pas d'identité.
-        - { path: ^/dashboard, roles: ROLE_DEPUTE }
+        # Le motif s'arrête à la frontière du segment : sans cela il attrape
+        # aussi /dashboard-mp — l'ancienne adresse du legacy, qui doit rendre
+        # son 301 (RedirectionLegacyController) avant toute authentification,
+        # comme le .htaccess du site vivant le faisait.
+        - { path: ^/dashboard(/|$), roles: ROLE_DEPUTE }
 
 when@test:
     security:

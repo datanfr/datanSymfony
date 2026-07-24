@@ -14,17 +14,26 @@ use Doctrine\ORM\Mapping as ORM;
  * `/register/{token}`. La possession de l'adresse `@assemblee-nationale.fr`
  * tenait donc lieu de contrôle — seul le vrai député recevait le lien.
  *
- * Ce portage n'a pas d'envoi de courriel (Mailjet est une affaire de
- * déploiement, comme pour la newsletter), et `/register` relève des comptes
- * lecteurs, chantier séparé. La demande devient donc une ligne **en attente**
- * qu'un administrateur relit et approuve : c'est lui qui, au moment
- * d'approuver, transmet les identifiants à l'adresse institutionnelle — le
- * contrôle par l'adresse est reporté là, il n'est pas perdu.
+ * Ce portage n'envoie le courriel qu'au déploiement (MAILER_DSN, `null://` en
+ * local) : la demande devient d'abord une ligne **en attente** qu'un
+ * administrateur relit. À l'approbation seulement, on restitue le jeton du
+ * legacy — un `token` posé ici même — et le lien `/register/{token}` par lequel
+ * le député crée lui-même son compte et choisit son mot de passe. La relecture
+ * humaine reste donc en amont du jeton, et le contrôle par l'adresse
+ * institutionnelle tient toujours : le lien y est transmis.
+ *
+ * Divergence assumée avec le legacy : son jeton `users_mp_link` expirait 24 h
+ * après **l'envoi automatique** du courriel de demande. Ici le jeton naît à
+ * l'approbation et un humain le transmet à une échéance inconnue ; une fenêtre
+ * de 24 h enfermerait dehors la moitié des députés. Le jeton est donc à usage
+ * unique (annulé dès le compte créé) sans butoir horaire — le nettoyer à la
+ * main reste possible via un refus.
  */
 #[ORM\Entity(repositoryClass: DemandeCompteDeputeRepository::class)]
 #[ORM\Table(name: 'demande_compte_depute')]
 #[ORM\Index(name: 'idx_demande_depute', columns: ['depute_id'])]
 #[ORM\Index(name: 'idx_demande_etat', columns: ['etat'])]
+#[ORM\UniqueConstraint(name: 'uniq_demande_token', columns: ['token'])]
 class DemandeCompteDepute
 {
     public const EN_ATTENTE = 'en_attente';
@@ -46,6 +55,15 @@ class DemandeCompteDepute
 
     #[ORM\Column(length: 20)]
     private string $etat = self::EN_ATTENTE;
+
+    /**
+     * Jeton d'activation, posé à l'approbation et porté par le lien
+     * `/register/{token}`. Nul tant que la demande n'est pas approuvée, et
+     * annulé (remis à nul) une fois le compte créé : un jeton à usage unique.
+     * L'unicité tolère plusieurs nuls — MariaDB l'admet sur un index unique.
+     */
+    #[ORM\Column(length: 100, nullable: true)]
+    private ?string $token = null;
 
     #[ORM\Column(type: 'datetime_immutable')]
     private \DateTimeImmutable $demandeeLe;
@@ -103,6 +121,18 @@ class DemandeCompteDepute
     public function estEnAttente(): bool
     {
         return $this->etat === self::EN_ATTENTE;
+    }
+
+    public function getToken(): ?string
+    {
+        return $this->token;
+    }
+
+    public function setToken(?string $token): static
+    {
+        $this->token = $token;
+
+        return $this;
     }
 
     public function getDemandeeLe(): \DateTimeImmutable

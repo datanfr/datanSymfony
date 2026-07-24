@@ -66,6 +66,16 @@
       <p>Ma candidature</p>
     </a>
   </li>
+  {# Accès à « mon compte » — c'est par là qu'un député change le mot de passe
+     provisoire qu'on lui a transmis (page ouverte aux trois familles de comptes,
+     cf. MonCompteController). Le legacy n'y menait pas depuis le tableau de bord ;
+     on l'ajoute, la page existant désormais. #}
+  <li class="nav-item">
+    <a href="{{ path('mon_compte') }}" class="nav-link">
+      <i class="nav-icon far fa-user"></i>
+      <p>Mon compte</p>
+    </a>
+  </li>
 {% endblock %}
 
 {% block fil_ariane %}

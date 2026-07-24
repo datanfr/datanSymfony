@@ -61,12 +61,40 @@
                d'origine, seul le bloc « Clés API » était réservé à
                l'administrateur (`is_admin()`), et il n'est pas porté. La
                distinction de rôle joue à l'intérieur des sections (publier,
-               reprendre un contenu publié, supprimer), pas sur le menu. #}
+               reprendre un contenu publié, supprimer), pas sur le menu — à une
+               exception près, les demandes de compte député : l'écran n'existe
+               pas dans le legacy (la validation y passait par un lien envoyé à
+               l'adresse institutionnelle) et l'approbation crée un compte,
+               geste réservé à l'administrateur. #}
             <li class="nav-item">
               <a href="{{ path('admin_decryptage_index') }}" class="nav-link">
                 <i class="nav-icon far fa-file-alt"></i>
                 <p>Décryptages</p>
               </a>
+            </li>
+            <li class="nav-item">
+              <a href="{{ path('admin_amendement_index') }}" class="nav-link">
+                <i class="nav-icon far fa-edit"></i>
+                <p>Amendements</p>
+              </a>
+            </li>
+            <li class="nav-item has-treeview">
+              <a href="#" class="nav-link">
+                <i class="nav-icon far fa-newspaper"></i>
+                <p>Blog<i class="fas fa-angle-left right"></i></p>
+              </a>
+              <ul class="nav nav-treeview">
+                <li class="nav-item">
+                  <a href="{{ path('admin_blog_index') }}" class="nav-link">
+                    <i class="far fa-circle nav-icon"></i><p>Tous les articles</p>
+                  </a>
+                </li>
+                <li class="nav-item">
+                  <a href="{{ path('admin_blog_creer') }}" class="nav-link">
+                    <i class="far fa-circle nav-icon"></i><p>Créer un article</p>
+                  </a>
+                </li>
+              </ul>
             </li>
             <li class="nav-item has-treeview">
               <a href="#" class="nav-link">
@@ -155,6 +183,24 @@
                   </a>
                 </li>
               </ul>
+            </li>
+            {% if is_granted('ROLE_ADMIN') %}
+              <li class="nav-item">
+                <a href="{{ path('admin_demande_compte_index') }}" class="nav-link">
+                  <i class="nav-icon far fa-id-card"></i>
+                  <p>Demandes de compte</p>
+                </a>
+              </li>
+            {% endif %}
+            {# /mon-compte est ouvert à tout connecté (livraison des comptes
+               lecteurs, 24 juillet) : c'est ici que la rédaction change son
+               mot de passe. Les députés ont leur propre entrée dans la barre
+               du tableau de bord, qui redéfinit ce bloc. #}
+            <li class="nav-item">
+              <a href="{{ path('mon_compte') }}" class="nav-link">
+                <i class="nav-icon far fa-user"></i>
+                <p>Mon compte</p>
+              </a>
             </li>
           {% endblock %}
         </ul>
