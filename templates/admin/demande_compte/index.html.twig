@@ -1,0 +1,66 @@
+{% extends 'admin/base.html.twig' %}
+
+{% block title %}Demandes de compte député{% endblock %}
+
+{# Dans l'espace des demandes, la barre latérale montre les deux entrées de la
+   rédaction — la page des décryptages n'étant pas modifiable ici, on redéclare
+   son lien à côté du nôtre. #}
+{% block sidebar_menu %}
+  <li class="nav-item">
+    <a href="{{ path('admin_decryptage_index') }}" class="nav-link">
+      <i class="nav-icon far fa-file-alt"></i>
+      <p>Décryptages</p>
+    </a>
+  </li>
+  <li class="nav-item">
+    <a href="{{ path('admin_demande_compte_index') }}" class="nav-link active">
+      <i class="nav-icon far fa-id-card"></i>
+      <p>Demandes de compte</p>
+    </a>
+  </li>
+{% endblock %}
+
+{% block body %}
+  <p class="mt-2">
+    Les députés qui ont demandé un accès depuis <a href="{{ path('demande_compte_depute') }}" target="_blank" rel="noopener">/demande-compte-depute</a>.
+    Approuver une demande ouvre le compte et affiche, une seule fois, les identifiants à transmettre au député.
+  </p>
+
+  <div class="card">
+    <div class="card-body p-0">
+      <table class="table table-striped mb-0">
+        <caption class="sr-only">Demandes de compte en attente</caption>
+        <thead>
+          <tr>
+            <th scope="col">Député</th>
+            <th scope="col">Adresse saisie</th>
+            <th scope="col">Demandée le</th>
+            <th scope="col" class="text-right">Traitement</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for demande in demandes %}
+            <tr>
+              <td class="font-weight-bold">{{ demande.depute.firstname }} {{ demande.depute.lastname }}</td>
+              <td>{{ demande.email }}</td>
+              <td>{{ demande.demandeeLe|date('d/m/Y à H:i') }}</td>
+              <td class="text-right">
+                <form method="post" action="{{ path('admin_demande_compte_approuver', {id: demande.id}) }}" class="d-inline">
+                  <input type="hidden" name="_token" value="{{ csrf_token('traiter_demande_' ~ demande.id) }}">
+                  <button type="submit" class="btn btn-sm btn-primary">Approuver et ouvrir le compte</button>
+                </form>
+                <form method="post" action="{{ path('admin_demande_compte_refuser', {id: demande.id}) }}" class="d-inline"
+                      onsubmit="return confirm('Refuser cette demande ?');">
+                  <input type="hidden" name="_token" value="{{ csrf_token('traiter_demande_' ~ demande.id) }}">
+                  <button type="submit" class="btn btn-sm btn-outline-danger">Refuser</button>
+                </form>
+              </td>
+            </tr>
+          {% else %}
+            <tr><td colspan="4" class="text-center p-4">Aucune demande en attente.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+{% endblock %}

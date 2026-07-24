@@ -1,0 +1,29 @@
+{# Pied des pages de département et de ville : les communes du département
+   dépassant le seuil de peuplement, de la plus grande à la plus petite.
+
+   Trois collectivités d'outre-mer comptent si peu de communes que l'intitulé
+   « les plus peuplées » y serait absurde — et Wallis-et-Futuna n'en a qu'une.
+   Aucune de leurs communes n'a de population au référentiel : leurs trois
+   intitulés ne sortent donc jamais aujourd'hui, et le bloc entier est masqué.
+   Le site, lui, y affiche un titre au-dessus d'une liste vide. #}
+<div class="container-fluid bloc-others-container">
+  <div class="container bloc-others">
+    <div class="row">
+      <div class="col-12">
+        <h2>
+          {%- if departement.nom in ['Nouvelle-Calédonie', 'Polynésie française'] %}Communes {{ nom_article }} ({{ departement.code }})
+          {%- elseif departement.nom == 'Wallis-et-Futuna' %}Commune {{ nom_article }} ({{ departement.code }})
+          {%- else %}Communes les plus peuplées {{ nom_article }} ({{ departement.code }})
+          {%- endif %}
+        </h2>
+      </div>
+    </div>
+    <div class="row">
+      {% for commune in communes %}
+        <div class="col-6 col-md-3 py-2">
+          <a class="membre no-decoration underline" href="{{ path('commune_individual', {departement: departement.slug, commune: commune.slug}) }}">{{ commune.nom }}</a>
+        </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>

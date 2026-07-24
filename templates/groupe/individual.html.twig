@@ -1,0 +1,278 @@
+{% extends 'base.html.twig' %}
+
+{% set nom_groupe = groupe.libelle|name_group %}
+{% set actif = groupe.date_fin is null %}
+
+{% block title %}{{ nom_groupe }} ({{ groupe.libelle_abrev }}) - Groupe parlementaire - Datan{% endblock %}
+
+{% block meta_description %}{{ nom_groupe }} ({{ groupe.libelle_abrev }}) : effectif, cohésion, participation et positions du groupe sur les votes décryptés.{% endblock %}
+
+{% block body %}
+<div class="container-fluid bloc-img-deputes async_background" id="container-always-fluid" style="height: 13em"></div>
+<div class="container pg-groupe-individual mb-5">
+  <div class="row">
+    <div class="col-lg-4 col-md-5 col-12">
+      <div class="card card-profile groupe">
+        <div class="card-body">
+          <div class="img">
+            <div class="d-flex justify-content-center">
+              <picture>
+                <source srcset="{{ asset('assets/imgs/groupes/' ~ groupe.legislature ~ '/webp/' ~ groupe.libelle_abrev ~ '.webp') }}" type="image/webp">
+                <source srcset="{{ asset('assets/imgs/groupes/' ~ groupe.legislature ~ '/' ~ groupe.libelle_abrev ~ '.png') }}" type="image/png">
+                <img src="{{ asset('assets/imgs/groupes/' ~ groupe.legislature ~ '/' ~ groupe.libelle_abrev ~ '.png') }}" width="150" height="150" alt="{{ nom_groupe }}">
+              </picture>
+            </div>
+          </div>
+          <div class="bloc-infos mt-2">
+            <h1 class="title d-block text-lg-left" style="color: {{ groupe.couleur }}">{{ nom_groupe }}</h1>
+          </div>
+          <div class="bloc-bref mt-3 d-flex justify-content-center justify-content-lg-start">
+            <ul>
+              <li class="first">
+                <div class="label">Sigle</div>
+                <div class="value">{{ groupe.libelle_abrev }}</div>
+              </li>
+              {% if groupe.date_debut %}
+                <li>
+                  <div class="label">Création</div>
+                  <div class="value">{{ groupe.date_debut|date('d/m/Y') }}</div>
+                </li>
+              {% endif %}
+              {% if groupe.date_fin %}
+                <li>
+                  <div class="label">Dissolution</div>
+                  <div class="value">{{ groupe.date_fin|date('d/m/Y') }}</div>
+                </li>
+              {% endif %}
+              {% if president and president.date_fin is null %}
+                <li>
+                  <div class="label">Président{{ president.civilite == 'Mme' ? 'e' : '' }}</div>
+                  <div class="value">
+                    {% if president.dpt_slug and president.slug %}
+                      <a class="no-decoration underline" href="{{ path('depute_individual', {dptSlug: president.dpt_slug, slug: president.slug}) }}">{{ president.firstname }} {{ president.lastname }}</a>
+                    {% else %}
+                      {{ president.firstname }} {{ president.lastname }}
+                    {% endif %}
+                  </div>
+                </li>
+              {% endif %}
+              {% if groupe.position_politique %}
+                <li class="mb-0">
+                  <div class="label">Position</div>
+                  <div class="value">{{ groupe.position_politique }}</div>
+                </li>
+              {% endif %}
+            </ul>
+          </div>
+          <div class="text-center mt-2">
+            <a class="btn btn-outline-primary" href="{{ path('groupe_membres', {legislature: groupe.legislature, abrev: groupe.libelle_abrev|lower}) }}">Voir les {{ chiffres.effectif }} membres</a>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-lg-8 col-md-7 col-12">
+      {{ include('partials/campagne.html.twig', {classes: 'mt-5'}) }}
+      <div class="mt-5 mt-md-0">
+        <h2 class="mb-3">En chiffres</h2>
+        <div class="row">
+          <div class="col-md-4 mb-3">
+            <div class="card h-100">
+              <div class="card-body text-center">
+                <h3 class="subtitle">Nombre de députés</h3>
+                <p class="display-4 mb-0" style="color: {{ groupe.couleur }}">{{ chiffres.effectif }}</p>
+              </div>
+            </div>
+          </div>
+          <div class="col-md-4 mb-3">
+            <div class="card h-100">
+              <div class="card-body text-center">
+                <h3 class="subtitle">Âge moyen</h3>
+                <p class="display-4 mb-0" style="color: {{ groupe.couleur }}">{{ chiffres.age_moyen ?? '—' }}</p>
+                <p class="mb-0 small">ans</p>
+              </div>
+            </div>
+          </div>
+          <div class="col-md-4 mb-3">
+            <div class="card h-100">
+              <div class="card-body text-center">
+                <h3 class="subtitle">Taux de féminisation</h3>
+                <p class="display-4 mb-0" style="color: {{ groupe.couleur }}">{{ chiffres.feminisation is not null ? chiffres.feminisation ~ ' %' : '—' }}</p>
+                <p class="mb-0 small">{{ chiffres.femmes }} femmes sur {{ chiffres.effectif }}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="mt-5">
+        <h2 class="mb-3">Comportement politique</h2>
+        <div class="row">
+          <div class="col-md-6 mb-3">
+            <div class="card h-100">
+              <div class="card-body text-center">
+                <h3 class="subtitle">Taux de cohésion</h3>
+                <p class="display-4 mb-1" style="color: {{ groupe.couleur }}">{{ comportement.cohesion_moyenne is not null ? comportement.cohesion_moyenne|round(2) : '—' }}</p>
+                <p class="mb-0 small">moyenne sur {{ comportement.scrutins }} scrutins</p>
+                <p class="mt-3 mb-0 small font-italic">Le taux de cohésion mesure l'unité du groupe lorsqu'il vote, de 0 à 1. Proche de 1, le groupe est très uni.</p>
+                <a class="btn btn-outline-primary text-center mt-3" href="{{ path('groupe_statistiques', {legislature: groupe.legislature, abrev: groupe.libelle_abrev|lower}) }}#cohesion">En savoir plus</a>
+              </div>
+            </div>
+          </div>
+          <div class="col-md-6 mb-3">
+            <div class="card h-100">
+              <div class="card-body text-center">
+                <h3 class="subtitle">Taux de participation</h3>
+                <p class="display-4 mb-1" style="color: {{ groupe.couleur }}">{{ comportement.participation_moyenne is not null ? comportement.participation_moyenne ~ ' %' : '—' }}</p>
+                <p class="mb-0 small">part moyenne des membres prenant part au vote</p>
+                <a class="btn btn-outline-primary text-center mt-3" href="{{ path('groupe_statistiques', {legislature: groupe.legislature, abrev: groupe.libelle_abrev|lower}) }}#participation">En savoir plus</a>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {% if soutien.votes > 0 %}
+        <div class="mt-5">
+          <h2 class="mb-3">Soutien envers le gouvernement</h2>
+          <div class="card card-statistiques border-0">
+            <div class="card-body">
+              {% if groupe.position_politique in ['Minoritaire', 'Majoritaire'] %}
+                <p>Le groupe {{ nom_groupe }} {{ actif ? 'est' : 'était' }} membre de la <b>majorité présidentielle</b>. Le groupe {{ actif ? 'soutient' : 'soutenait' }} donc l'action du gouvernement et {{ actif ? 'vote' : 'votait' }} fréquemment en faveur des textes qu'il présente.</p>
+              {% elseif groupe.position_politique == 'Opposition' %}
+                <p>Le groupe {{ nom_groupe }} est un <b>groupe d'opposition</b>. Si l'opposition vote parfois en faveur des textes du gouvernement, son soutien n'est pas systématique.</p>
+              {% endif %}
+              <p class="mb-0">
+                Sur {{ soutien.votes > 1 ? 'les ' ~ soutien.votes ~ ' votes' : 'le vote' }} sur des projets de loi présentés par le gouvernement, le groupe {{ groupe.libelle_abrev }}
+                a voté <b>en faveur de {{ soutien.soutiens }} texte{{ soutien.soutiens > 1 ? 's' : '' }}</b>.
+                Il a donc soutenu le gouvernement dans {{ soutien.pourcentage }} % des cas.
+              </p>
+
+              {% if soutien_groupes|length > 1 %}
+                {% set max_soutiens = soutien_groupes|first.soutiens %}
+                <div class="row mt-4 bar-container stats rounded-bottom py-4">
+                  <div class="col-12">
+                    <p class="text-center font-weight-bold mt-2 pb-3 h4">Les groupes soutenant le plus le gouvernement</p>
+                    <div class="chart">
+                      <div class="bar-chart d-flex flex-row justify-content-between align-items-end">
+                        {% for g in soutien_groupes %}
+                          <div class="bars mx-1 mx-md-2 {{ g.uid == groupe.uid ? 'bg-danger' : '' }}"
+                               style="height: {{ max_soutiens > 0 ? (g.soutiens / max_soutiens * 100)|round : 0 }}%">
+                            <span class="score">{{ g.soutiens }}</span>
+                          </div>
+                        {% endfor %}
+                      </div>
+                    </div>
+                  </div>
+                  <div class="col-12 d-flex justify-content-between mt-2">
+                    {% for g in soutien_groupes %}
+                      <div class="legend-element d-flex align-items-center justify-content-center">
+                        <span class="font-weight-bold text-center tooltipHelp tooltipDashed" data-toggle="tooltip" data-placement="top" title="{{ g.libelle|name_group }}">{{ g.libelle_abrev }}</span>
+                      </div>
+                    {% endfor %}
+                  </div>
+                </div>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+      {% endif %}
+
+      {% if derniers_votes %}
+        <div class="mt-5">
+          <h2 class="mb-3">Derniers votes décryptés</h2>
+          <table class="table table-striped" style="width: 100%">
+            <caption class="sr-only">Positions du groupe sur les derniers votes décryptés</caption>
+            <thead>
+              <tr>
+                <th scope="col" class="all">Vote</th>
+                <th scope="col" class="text-center all">Position</th>
+                <th scope="col" class="text-center min-tablet">Pour</th>
+                <th scope="col" class="text-center min-tablet">Contre</th>
+                <th scope="col" class="text-center min-tablet">Cohésion</th>
+                <th scope="col" class="text-center">Résultat</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for v in derniers_votes %}
+                <tr>
+                  <td class="name">
+                    <a class="no-decoration underline" href="{{ lien_vote(v.legislature, v.vote_numero) }}">{{ v.title }}</a>
+                  </td>
+                  <td class="text-center vote sort-{{ v.position_majoritaire }}">
+                    {% if v.position_majoritaire and v.position_majoritaire != 'nv' %}{{ v.position_majoritaire|upper }}{% else %}Non votant{% endif %}
+                  </td>
+                  <td class="text-center">{{ v.nombre_pours }}</td>
+                  <td class="text-center">{{ v.nombre_contres }}</td>
+                  <td class="text-center">{{ v.cohesion }}</td>
+                  <td class="text-center sort-{{ v.sort_code }}">{{ v.sort_code|upper }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+          <div class="text-center">
+            <a class="btn see-all-votes mx-2" href="{{ path('groupe_votes', {legislature: groupe.legislature, abrev: groupe.libelle_abrev|lower}) }}">Voir tous les votes décryptés</a>
+            <a class="btn btn-outline-primary mx-2" href="{{ path('groupe_votes_tous', {legislature: groupe.legislature, abrev: groupe.libelle_abrev|lower}) }}">Voir tous les scrutins</a>
+          </div>
+        </div>
+      {% endif %}
+
+      {% if presidences|length > 1 %}
+        <div class="mt-5">
+          <h2 class="mb-3">Les présidences successives</h2>
+          <table class="table table-striped" style="width: 100%">
+            <caption class="sr-only">Présidences successives du groupe</caption>
+            <thead>
+              <tr>
+                <th scope="col">Président</th>
+                <th scope="col" class="text-center">Début</th>
+                <th scope="col" class="text-center">Fin</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for p in presidences %}
+                <tr>
+                  <td class="name">
+                    {% if p.dpt_slug and p.slug %}
+                      <a class="no-decoration underline" href="{{ path('depute_individual', {dptSlug: p.dpt_slug, slug: p.slug}) }}">{{ p.firstname }} {{ p.lastname }}</a>
+                    {% else %}
+                      {{ p.firstname }} {{ p.lastname }}
+                    {% endif %}
+                  </td>
+                  <td class="text-center">{{ p.date_debut ? p.date_debut|date('d/m/Y') : '' }}</td>
+                  <td class="text-center">{{ p.date_fin ? p.date_fin|date('d/m/Y') : 'En cours' }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% endif %}
+
+      {% if historique %}
+        <div class="mt-5">
+          <h2 class="mb-3">Historique du groupe {{ groupe.libelle_abrev }}</h2>
+          <div class="row">
+            {% for h in historique %}
+              <div class="col-md-6 mb-3">
+                <div class="card h-100" style="border-left: 4px solid {{ h.couleur ?: '#00668e' }}">
+                  <div class="card-body">
+                    <span class="num">{{ h.legislature }}<sup>e</sup> législature</span>
+                    <h3 class="h6 mt-2 mb-1">
+                      <a class="no-decoration underline" href="{{ path('groupe_individual', {legislature: h.legislature, abrev: h.libelle_abrev|lower}) }}">{{ h.libelle|name_group }}</a>
+                    </h3>
+                    <p class="mb-0 small">
+                      {{ h.effectif }} député{{ h.effectif > 1 ? 's' : '' }} rattaché{{ h.effectif > 1 ? 's' : '' }}
+                      {% if h.date_debut %} — depuis le {{ h.date_debut|date('d/m/Y') }}{% endif %}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            {% endfor %}
+          </div>
+        </div>
+      {% endif %}
+
+    </div>
+  </div>
+</div>
+{% endblock %}

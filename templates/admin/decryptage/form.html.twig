@@ -1,0 +1,74 @@
+{% extends 'admin/base.html.twig' %}
+
+{% block title %}{{ decryptage ? 'Modifier un décryptage' : 'Décrypter un vote' }}{% endblock %}
+
+{% block body %}
+  {{ form_start(formulaire) }}
+    {# Erreurs non rattachées à un champ (jeton expiré, contrainte d'ensemble) :
+       sans cela le formulaire se réafficherait sans rien expliquer. #}
+    {% if not formulaire.vars.valid %}
+      <div class="alert alert-danger">
+        {{ form_errors(formulaire) }}
+        <p class="mb-0">Le formulaire comporte des erreurs, corrigez les champs signalés.</p>
+      </div>
+    {% endif %}
+
+    <div class="row">
+      <div class="col-lg-8">
+        <div class="card">
+          <div class="card-body">
+            {% if formulaire.legislature is defined %}
+              <div class="form-row">
+                <div class="col-md-4">{{ form_row(formulaire.legislature) }}</div>
+                <div class="col-md-8">{{ form_row(formulaire.voteNumero) }}</div>
+              </div>
+            {% endif %}
+            {{ form_row(formulaire.title) }}
+            {{ form_row(formulaire.description) }}
+          </div>
+        </div>
+      </div>
+
+      <div class="col-lg-4">
+        <div class="card">
+          <div class="card-body">
+            {{ form_row(formulaire.categorie) }}
+            {{ form_row(formulaire.lecture) }}
+            {% if formulaire.state is defined %}
+              {{ form_row(formulaire.state) }}
+            {% else %}
+              <p class="text-muted mb-0">Le décryptage sera enregistré en brouillon ; vous pourrez le publier ensuite.</p>
+            {% endif %}
+          </div>
+        </div>
+
+        {% if decryptage and decryptage.scrutin %}
+          <div class="card">
+            <div class="card-body">
+              <h2 class="h6">Le scrutin décrypté</h2>
+              <p class="mb-2 small">{{ decryptage.scrutin.titre }}</p>
+              <a class="btn btn-sm btn-outline-secondary" target="_blank" rel="noopener"
+                 href="{{ lien_vote(decryptage.legislature, decryptage.voteNumero) }}">Voir la page publique</a>
+            </div>
+          </div>
+        {% endif %}
+
+        <button type="submit" class="btn btn-primary btn-block">Enregistrer</button>
+        <a class="btn btn-link btn-block" href="{{ path('admin_decryptage_index') }}">Revenir à la liste</a>
+      </div>
+    </div>
+  {{ form_end(formulaire) }}
+{% endblock %}
+
+{% block javascripts %}
+  {# Même éditeur que le tableau de bord d'origine : CKEditor 5, monté sur #editor. #}
+  <script type="importmap">
+    {
+      "imports": {
+        "ckeditor5": "{{ asset('assets/js/libraries/ckeditor/ckeditor5.js') }}",
+        "ckeditor5/": "{{ asset('assets/js/libraries/ckeditor/') }}"
+      }
+    }
+  </script>
+  <script type="module" src="{{ asset('assets/js/dashboard/init-ckeditor.js') }}"></script>
+{% endblock %}

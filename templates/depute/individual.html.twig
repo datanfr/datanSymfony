@@ -1,0 +1,226 @@
+{% extends 'base.html.twig' %}
+
+{% set nom_complet = depute.firstname ~ ' ' ~ depute.lastname %}
+
+{% block title %}{{ nom_complet }} - Député{{ depute.groupe_abrev ? ' ' ~ depute.groupe_abrev : '' }} - Datan{% endblock %}
+
+{% block meta_description %}Votes, taux de participation et loyauté de {{ nom_complet }}, député{{ depute.groupe_libelle ? ' du groupe ' ~ (depute.groupe_libelle|name_group) : '' }}.{% endblock %}
+
+{% block body %}
+<div class="container-fluid bloc-img-deputes async_background" id="container-always-fluid" style="height: 13em"></div>
+<div class="container pg-depute-individual mb-5">
+  <div class="row">
+    <div class="col-lg-4 col-md-5 col-12">
+      <div class="card card-profile">
+        <div class="card-body">
+          <div class="d-flex justify-content-center">
+            <div class="depute-img-circle">
+              <img src="{{ photo_depute(depute) }}" width="150" height="192" alt="{{ nom_complet }}">
+            </div>
+          </div>
+          <div class="bloc-infos">
+            <h1 class="title d-block text-center">{{ nom_complet }}</h1>
+            {% if depute.groupe_libelle %}
+              <div class="link-group text-center mt-1">
+                <a href="{{ path('groupe_individual', {legislature: mandats ? mandats[0].legislature : 17, abrev: depute.groupe_abrev|lower}) }}"
+                   style="color: {{ depute.groupe_couleur }}; --color-group: {{ depute.groupe_couleur }}">
+                  {{ depute.groupe_libelle|name_group }}
+                </a>
+              </div>
+            {% endif %}
+          </div>
+          <div class="bloc-bref mt-3 d-flex justify-content-center justify-content-lg-start">
+            <ul>
+              {% if depute.departement_nom %}
+                <li class="first">
+                  <div class="value">{{ depute.departement_nom }} ({{ depute.departement_code }}){% if depute.circonscription %} — {{ depute.circonscription }}<sup>e</sup> circonscription{% endif %}</div>
+                </li>
+              {% endif %}
+              {% if depute.age %}
+                <li>
+                  <div class="value">{{ depute.age }} ans</div>
+                </li>
+              {% endif %}
+              {% if depute.commission %}
+                <li>
+                  <div class="value">Commission {{ depute.commission }}</div>
+                </li>
+              {% endif %}
+              {% if depute.position_politique %}
+                <li>
+                  <div class="value">{{ depute.position_politique }}</div>
+                </li>
+              {% endif %}
+              <li class="mb-0">
+                <div class="value">
+                  {% if actif %}
+                    <span class="badge sort badge-adopté">EN ACTIVITÉ</span>
+                  {% elseif mandats %}
+                    Dernier mandat : {{ mandats[0].legislature }}<sup>e</sup> législature
+                  {% else %}
+                    Mandat terminé{{ depute.cause_fin ? ' — ' ~ depute.cause_fin : '' }}
+                  {% endif %}
+                </div>
+              </li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-lg-8 col-md-7 col-12">
+      {% if depute.profession or mandats %}
+        <div class="mt-5 mt-md-0">
+          <h2>Qui est-{{ depute.groupe_libelle is defined ? 'il' : 'il' }} ?</h2>
+          <div class="card mt-4">
+            <div class="card-body">
+              <p class="mb-0">
+                {{ nom_complet }} {{ actif ? 'est député' : 'a été député' }} de la {{ depute.circonscription }}<sup>e</sup> circonscription
+                {% if depute.departement_nom %}du département {{ depute.departement_nom }} ({{ depute.departement_code }}){% endif %}{% if depute.region %}, en {{ depute.region }}{% endif %}.
+                {% if mandats|length > 1 %}
+                  Il s'agit de son {{ mandats|length }}<sup>e</sup> mandat.
+                {% endif %}
+                {% if depute.profession %}
+                  Sa profession déclarée est : {{ depute.profession|lower }}.
+                {% endif %}
+                {% if depute.place_hemicycle %}
+                  Il siège à la place n° {{ depute.place_hemicycle }} de l'hémicycle.
+                {% endif %}
+              </p>
+            </div>
+          </div>
+        </div>
+      {% endif %}
+      {% if positions_cles %}
+        <div class="mt-5 mt-md-0">
+          <h2>Ses positions</h2>
+          <div class="mt-4 bloc-groupes d-flex flex-column flex-lg-row">
+            {% for position, couleur in {'pour': '0, 183, 148', 'contre': '197, 40, 61'} %}
+              {% set liste = positions_cles|filter(p => p.position == position) %}
+              {% if liste|length %}
+                <div class="bloc-groupe d-flex justify-content-center flex-fill">
+                  <div class="card m-2 w-100" style="border: 0.5px solid rgba({{ couleur }}, 1)">
+                    <div class="thumb d-flex justify-content-end">
+                      <span style="background-color: rgba({{ couleur }}, 1);">{{ position|upper }}</span>
+                    </div>
+                    <div class="card-body">
+                      <ul class="pl-3 mb-0">
+                        {% for p in liste %}
+                          <li class="mb-2">
+                            <a class="no-decoration underline" href="{{ lien_vote(p.legislature, p.vote_numero) }}">{{ p.title }}</a>
+                          </li>
+                        {% endfor %}
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+              {% endif %}
+            {% endfor %}
+          </div>
+        </div>
+      {% endif %}
+
+      <div class="mt-5">
+        <h2>Son comportement de vote</h2>
+        <div class="row mt-4">
+          <div class="col-md-6 mb-3">
+            <div class="card h-100">
+              <div class="card-body text-center">
+                <h3 class="subtitle">Taux de participation</h3>
+                {% if participation.taux is not null %}
+                  <p class="display-4 mb-1" style="color: {{ depute.groupe_couleur ?: '#00668e' }}">{{ participation.taux }} %</p>
+                  <p class="mb-0 small">{{ participation.exprimes }} votes exprimés sur {{ participation.total }} scrutins solennels</p>
+                {% else %}
+                  <p class="mb-0">Il n'y a pas encore eu suffisamment de votes solennels à l'Assemblée nationale pour afficher ce taux.</p>
+                {% endif %}
+                <p class="mt-3 mb-0 small font-italic">Les votes solennels sont les votes considérés comme importants pour lesquels les députés sont particulièrement attendus.</p>
+              </div>
+            </div>
+          </div>
+          <div class="col-md-6 mb-3">
+            <div class="card h-100">
+              <div class="card-body text-center">
+                <h3 class="subtitle">Taux de loyauté</h3>
+                {% if loyaute and loyaute.taux is not null %}
+                  <p class="display-4 mb-1" style="color: {{ depute.groupe_couleur ?: '#00668e' }}">{{ loyaute.taux }} %</p>
+                  <p class="mb-0 small">{{ loyaute.conformes }} votes conformes à la position de son groupe sur {{ loyaute.total }}</p>
+                {% else %}
+                  <p class="mb-0">Taux indisponible : ce député n'est rattaché à aucun groupe.</p>
+                {% endif %}
+                <p class="mt-3 mb-0 small font-italic">Part des votes exprimés dans le même sens que la position majoritaire de son groupe.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="mt-5">
+        <h2>Ses derniers votes</h2>
+        <table class="table table-striped table-vote-individual mt-4" style="width: 100%">
+          <caption class="sr-only">Les derniers votes du député</caption>
+          <thead>
+            <tr>
+              <th scope="col" class="all">Scrutin</th>
+              <th scope="col" class="text-center min-tablet">Date</th>
+              <th scope="col" class="text-center all">Son vote</th>
+              <th scope="col" class="text-center min-tablet">Résultat</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for v in derniers_votes %}
+              <tr>
+                <td class="name">
+                  <a class="no-decoration underline" href="{{ path('vote_individual', {legislature: v.legislature, numero: v.numero}) }}">
+                    {{ v.decryptage_title ?: v.titre }}
+                  </a>
+                </td>
+                <td class="text-center">{{ v.scrutin_date ? v.scrutin_date|date('d/m/Y') : '' }}</td>
+                <td class="text-center vote sort-{{ v.position }}">{{ v.position == 'nonVotant' ? 'NON VOTANT' : v.position|upper }}</td>
+                <td class="text-center sort-{{ v.sort_code }}">{{ v.sort_code|upper }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        <div class="text-center">
+          <a class="btn see-all-votes mx-2" href="{{ path('depute_votes', {dptSlug: depute.dpt_slug, slug: depute.slug}) }}">Voir tous ses votes</a>
+        </div>
+      </div>
+
+      {% if election %}
+        {{ include('depute/_election.html.twig') }}
+      {% endif %}
+
+      {{ include('partials/campagne.html.twig', {classes: 'mt-5'}) }}
+
+      {% if mandats %}
+        <div class="mt-5">
+          <h2>Ses mandats</h2>
+          <table class="table table-striped mt-4" style="width: 100%">
+            <caption class="sr-only">Historique des mandats</caption>
+            <thead>
+              <tr>
+                <th scope="col">Législature</th>
+                <th scope="col" class="min-tablet">Circonscription</th>
+                <th scope="col" class="text-center">Début</th>
+                <th scope="col" class="text-center">Fin</th>
+                <th scope="col" class="min-tablet">Motif</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for m in mandats %}
+                <tr>
+                  <td class="name">{{ m.legislature }}<sup>e</sup> législature</td>
+                  <td>{{ m.departement_nom }}{% if m.circonscription %} ({{ m.departement_code }}) — {{ m.circonscription }}<sup>e</sup>{% endif %}</td>
+                  <td class="text-center">{{ m.date_debut ? m.date_debut|date('d/m/Y') : '' }}</td>
+                  <td class="text-center">{{ m.date_fin ? m.date_fin|date('d/m/Y') : 'En cours' }}</td>
+                  <td>{{ m.cause_mandat }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

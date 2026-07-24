@@ -1,0 +1,146 @@
+{# Fiche de député embarquable, portée de iframe/depute.php + iframe/partials/*.
+   Document AUTONOME : ni base.html.twig, ni barre de navigation, ni pied de page
+   de site — une iframe n'embarque que le contenu. Aucun en-tête X-Frame-Options
+   ni CSP frame-ancestors n'est posé (voir IframeController), la réponse reste
+   encadrable. Pistage et bannière de consentement volontairement absents : les
+   injecter chez un tiers serait un défaut. #}
+<!DOCTYPE html>
+<html lang="fr" dir="ltr" prefix="og: http://ogp.me/ns#">
+<head>
+  <meta charset="utf-8">
+  <meta name="robots" content="index,follow">
+  <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+  <title>{{ depute.firstname }} {{ depute.lastname }} - Activité Parlementaire | Datan</title>
+  <meta name="description" content="Découvrez les résultats des votes de {{ accord == 'e' ? 'la' : 'le' }} {{ depute_mot }} {{ depute.firstname }} {{ depute.lastname }} : taux de participation, loyauté avec son groupe.">
+  <meta name="theme-color" content="#00668e">
+  <link rel="stylesheet" type="text/css" href="{{ asset('assets/css/main.css') }}">
+</head>
+<body>
+  <main>
+    <div class="pg-depute-individual iframe-container {{ titre_principal_visible ? '' : 'no-title' }} {{ sous_titres_visibles ? '' : 'no-subtitle' }}">
+      {% if titre_principal_visible %}
+        <h1>
+          {%- if premiere_personne %}Mon activité de {{ depute_mot }}
+          {%- else %}L'activité de {{ depute_mot }} de {{ depute.firstname }} {{ depute.lastname }}{% endif -%}
+        </h1>
+      {% endif %}
+
+      {% for bloc in blocs %}
+
+        {% if bloc == 'positions-importantes' and positions_cles %}
+          <div class="bloc-key-votes mt-5">
+            {% if sous_titres_visibles %}<h2 class="mb-4 title-center">{{ possessif_pluriel }} positions importantes</h2>{% endif %}
+            <div class="mt-4 bloc-groupes d-flex flex-column flex-lg-row">
+              {% for position, couleur in {'pour': '0, 183, 148', 'contre': '197, 40, 61'} %}
+                {% set liste = positions_cles|filter(p => p.position == position) %}
+                {% if liste|length %}
+                  <div class="bloc-groupe d-flex justify-content-center flex-fill">
+                    <div class="card m-2 w-100" style="border: 0.5px solid rgba({{ couleur }}, 1)">
+                      <div class="thumb d-flex justify-content-end">
+                        <span style="background-color: rgba({{ couleur }}, 1);">{{ position|upper }}</span>
+                      </div>
+                      <div class="card-body">
+                        <ul class="pl-3 mb-0">
+                          {% for p in liste %}
+                            <li class="mb-2">
+                              <a class="no-decoration underline" href="{{ lien_vote(p.legislature, p.vote_numero) }}" target="_blank" rel="noopener">{{ p.title }}</a>
+                            </li>
+                          {% endfor %}
+                        </ul>
+                      </div>
+                    </div>
+                  </div>
+                {% endif %}
+              {% endfor %}
+            </div>
+          </div>
+        {% endif %}
+
+        {% if bloc == 'derniers-votes' and derniers_votes %}
+          <div class="bloc-votes mt-5">
+            {% if sous_titres_visibles %}<h2 class="mb-4 title-center">{{ possessif_pluriel }} derniers votes</h2>{% endif %}
+            <table class="table table-striped table-vote-individual mt-4" style="width: 100%">
+              <caption class="sr-only">Les derniers votes {{ premiere_personne ? 'de mon activité' : 'du député' }}</caption>
+              <thead>
+                <tr>
+                  <th scope="col" class="all">Scrutin</th>
+                  <th scope="col" class="text-center min-tablet">Date</th>
+                  <th scope="col" class="text-center all">{{ premiere_personne ? 'Mon vote' : 'Son vote' }}</th>
+                  <th scope="col" class="text-center min-tablet">Résultat</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for v in derniers_votes %}
+                  <tr>
+                    <td class="name">
+                      <a class="no-decoration underline" href="{{ lien_vote(v.legislature, v.numero) }}" target="_blank" rel="noopener">{{ v.decryptage_title ?: v.titre }}</a>
+                    </td>
+                    <td class="text-center">{{ v.scrutin_date ? v.scrutin_date|date('d/m/Y') : '' }}</td>
+                    <td class="text-center vote sort-{{ v.position }}">{{ v.position == 'nonVotant' ? 'NON VOTANT' : v.position|upper }}</td>
+                    <td class="text-center sort-{{ v.sort_code }}">{{ v.sort_code|upper }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% endif %}
+
+        {% if bloc == 'election' and election %}
+          {# La participation locale est masquée en contexte iframe, comme le
+             legacy (« Taux de participation (hors iframe) ») : on la neutralise
+             en passant participation à null au partial partagé avec la fiche. #}
+          {{ include('depute/_election.html.twig', {depute: depute, election: election|merge({participation: null})}) }}
+        {% endif %}
+
+        {% if bloc == 'comportement-politique' %}
+          <div class="bloc-statistiques mt-5">
+            {% if sous_titres_visibles %}<h2 class="mb-4 title-center">{{ possessif }} comportement politique</h2>{% endif %}
+            <div class="row mt-4">
+              <div class="col-md-6 mb-3">
+                <div class="card h-100">
+                  <div class="card-body text-center">
+                    <h3 class="subtitle">Taux de participation</h3>
+                    {% if participation and participation.taux is not null %}
+                      <p class="display-4 mb-1" style="color: {{ depute.groupe_couleur ?: '#00668e' }}">{{ participation.taux }} %</p>
+                      <p class="mb-0 small">{{ participation.exprimes }} votes exprimés sur {{ participation.total }} scrutins solennels</p>
+                    {% else %}
+                      <p class="mb-0">Il n'y a pas encore eu suffisamment de votes solennels à l'Assemblée nationale pour afficher ce taux.</p>
+                    {% endif %}
+                    <p class="mt-3 mb-0 small font-italic">Les votes solennels sont les votes considérés comme importants pour lesquels les députés sont particulièrement attendus.</p>
+                  </div>
+                </div>
+              </div>
+              <div class="col-md-6 mb-3">
+                <div class="card h-100">
+                  <div class="card-body text-center">
+                    <h3 class="subtitle">Taux de loyauté</h3>
+                    {% if loyaute and loyaute.taux is not null %}
+                      <p class="display-4 mb-1" style="color: {{ depute.groupe_couleur ?: '#00668e' }}">{{ loyaute.taux }} %</p>
+                      <p class="mb-0 small">{{ loyaute.conformes }} votes conformes à la position de son groupe sur {{ loyaute.total }}</p>
+                    {% else %}
+                      <p class="mb-0">Taux indisponible : ce député n'est rattaché à aucun groupe.</p>
+                    {% endif %}
+                    <p class="mt-3 mb-0 small font-italic">Part des votes exprimés dans le même sens que la position majoritaire de son groupe.</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        {% endif %}
+
+      {% endfor %}
+
+      <p class="datan-credit">
+        <img src="{{ asset('assets/imgs/favicon/datan_favicon.svg') }}" alt="logo de Datan" class="datan-logo">
+        Ce service est proposé par le site <a href="https://datan.fr" target="_blank" rel="noopener">datan.fr</a>
+      </p>
+    </div>
+  </main>
+  {# Même socle interactif que le reste du site (repli des cartes, infobulles) —
+     sans le pistage ni la bannière de consentement. #}
+  <script src="{{ asset('assets/js/libraries/jquery/jquery-3.5.1.min.js') }}"></script>
+  <script src="{{ asset('assets/js/libraries/popper/popper.min.js') }}"></script>
+  <script src="{{ asset('assets/js/libraries/bootstrap/bootstrap.min.js') }}"></script>
+  <script src="{{ asset('assets/js/main.min.js') }}"></script>
+</body>
+</html>
