@@ -70,6 +70,11 @@
       {% endif %}
       {# Le site nomme ici le maire de la commune. Sa table est vide dans la base
          dont nous disposons : le paragraphe est laissé de côté plutôt que deviné. #}
+      {# Le site écrit ici « de » en dur (commune.php:47) et donne « Les
+         circonscriptions de Ajaccio », alors qu'il élide correctement dans le
+         titre de la même page. C'est une faute d'élision, pas une tournure :
+         `ville.de` la corrige — ici comme partout ailleurs sur la fiche, faute
+         de quoi la page se contredirait d'un bloc à l'autre. #}
       <h2 class="mt-4">{{ pluriel ? 'Les circonscriptions' : 'La circonscription' }} {{ ville.de }}{{ ville.nom }}</h2>
       {% if pluriel %}
         <p>{{ ville.nom }} est une grande ville qui comprend plusieurs circonscriptions électorales.</p>
@@ -125,7 +130,7 @@
         {% else %}
           <h2 class="text-center text-white font-weight-bold mb-4">Je contacte un député</h2>
           <p class="text-center text-white">
-            {{ ville.nom }} est une grande ville et plusieurs députés y sont élus. Nous vous conseillons de contacter un des députés de {{ ville.nom }} par email :
+            {{ ville.nom }} est une grande ville et plusieurs députés y sont élus. Nous vous conseillons de contacter un des députés {{ ville.de }}{{ ville.nom }} par email :
           </p>
           {% for depute in joignables %}
             <p class="text-center text-white mb-1">
@@ -158,6 +163,11 @@
     </div>
   </div>
 {% endif %}
+{# Le bandeau social se place entre les autres députés et les communes du
+   département, et non en pied de page : c'est sa place sur le site
+   (commune.php:252), hors du `if` qui masque les autres députés — il s'affiche
+   donc même quand le département n'en compte pas d'autre. #}
+{{ include('partials/follow-us.html.twig') }}
 {% if communes %}
   {{ include('departement/partials/communes.html.twig', {departement: {nom: ville.dpt_nom, code: ville.dpt_code, slug: ville.dpt_slug}}) }}
 {% endif %}

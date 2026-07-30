@@ -69,7 +69,10 @@ class DecryptageType extends AbstractType
             ->add('description', TextareaType::class, [
                 'label' => 'Décryptage',
                 'required' => false,
-                'attr' => ['id' => 'editor', 'rows' => 14],
+                // La classe (et non un id « editor ») branche CKEditor : posé en
+                // id, il ferait doublon avec l'id propre du champ et le parseur
+                // le supprimerait — l'éditeur ne montait pas (init-ckeditor.js).
+                'attr' => ['class' => 'js-ckeditor', 'rows' => 14],
             ]);
 
         if ($options['peut_publier']) {

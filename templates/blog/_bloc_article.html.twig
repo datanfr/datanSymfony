@@ -20,5 +20,8 @@
   <div>
     <span class="date">{{ article.date_fr }}</span>
   </div>
-  <p class="chapo">{{ article.extrait }}</p>
+  {# L'accueil rend la carte sans chapô (`chapo => FALSE` chez l'origine). #}
+  {% if article.extrait is defined and article.extrait %}
+    <p class="chapo">{{ article.extrait }}</p>
+  {% endif %}
 </div>

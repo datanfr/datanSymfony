@@ -45,7 +45,9 @@ class FaqPostType extends AbstractType
             ])
             ->add('reponse', TextareaType::class, [
                 'label' => 'Réponse',
-                'attr' => ['id' => 'editor', 'rows' => 12],
+                // Classe et non id « editor » : en id il ferait doublon avec
+                // l'id du champ et serait supprimé au rendu (init-ckeditor.js).
+                'attr' => ['class' => 'js-ckeditor', 'rows' => 12],
                 'constraints' => [new NotBlank()],
             ]);
 

@@ -58,7 +58,8 @@ class ImportActeursCommand extends ImportTricoteusesCommand
      * libellé. Cette colonne reste alimentée par app:import:profils-sociaux.
      */
     private const COLONNES_DEPUTE = [
-        'mp_id', 'firstname', 'lastname', 'slug', 'civilite', 'age', 'profession',
+        'mp_id', 'firstname', 'lastname', 'slug', 'civilite', 'age',
+        'date_naissance', 'ville_naissance', 'profession',
         'groupe_id', 'parti_id', 'dpt_slug', 'departement_nom',
         'departement_code', 'circonscription', 'region', 'place_hemicycle',
         'commission', 'mail_an', 'date_fin', 'cause_fin', 'created_at', 'updated_at',
@@ -76,6 +77,31 @@ class ImportActeursCommand extends ImportTricoteusesCommand
     private AsciiSlugger $slugger;
 
     /**
+     * Le slug de personne est un contrat d'URL : datan.fr le fabrique par deux
+     * translittérateurs ICU (daily.php:313-333) qui ÉLIDENT la ponctuation à
+     * l'intérieur du prénom et du nom au lieu de la remplacer par un tiret —
+     * `marcphilippe-daubresse`, `charles-delaverpilliere`, `benjamin-lucaslundy`.
+     * Le seul tiret garanti est celui qui joint prénom et nom. Un AsciiSlugger
+     * sur « prénom nom » divergeait sur 449 des 2 119 fiches publiées : autant
+     * d'adresses indexées qui tombaient en 404. Règles reprises à l'identique.
+     */
+    private \Transliterator $translitterateurNom;
+    private \Transliterator $translitterateurPrenom;
+
+    /**
+     * `departement.slug` (la table tenue à la main du legacy) fait foi pour le
+     * segment de département : cinq diffèrent de la fabrication nom-code
+     * (CLAUDE.md, « deux jeux de slugs »). Même parade que ImportMandatsCommand ;
+     * sans elle, cet import — qui tourne chaque nuit dans app:sync:quotidien —
+     * refabriquerait l'ancienne forme et déferait le réalignement à chaque
+     * acteur modifié. Indexé en minuscules : la Corse s'écrit « 2A » ici, « 2a »
+     * ailleurs, et l'appariement ne doit rien devoir à la casse.
+     *
+     * @var array<string, string>
+     */
+    private array $slugsDepartement = [];
+
+    /**
      * Libellé des commissions permanentes, relevé au passage des organes.
      *
      * @var array<string, string>
@@ -91,6 +117,34 @@ class ImportActeursCommand extends ImportTricoteusesCommand
     {
         $io = new SymfonyStyle($input, $output);
         $this->slugger = new AsciiSlugger();
+
+        // Règles ICU de daily.php : translittérer en latin, ôter les accents,
+        // puis pour le NOM supprimer espaces ET ponctuation (« de la
+        // Verpillière » → « delaverpilliere »), pour le PRÉNOM supprimer la
+        // seule ponctuation (« Marc-Philippe » → « marcphilippe ») en changeant
+        // les espaces en tirets.
+        $nom = \Transliterator::createFromRules(
+            ':: Any-Latin; :: NFD; :: [:Nonspacing Mark:] Remove; :: NFC;'
+            . ':: [:Space:] Remove; :: [:Punctuation:] Remove; :: Lower();'
+            . "[:Separator:] > '-';"
+        );
+        $prenom = \Transliterator::createFromRules(
+            ':: Any-Latin; :: NFD; :: [:Nonspacing Mark:] Remove; :: NFC;'
+            . ':: [:Punctuation:] Remove; :: Lower();'
+            . "[:Separator:] > '-';"
+        );
+        if ($nom === null || $prenom === null) {
+            $io->error('Règles de translittération ICU refusées : slugs de personne impossibles à fabriquer.');
+
+            return Command::FAILURE;
+        }
+        $this->translitterateurNom = $nom;
+        $this->translitterateurPrenom = $prenom;
+
+        $this->slugsDepartement = [];
+        foreach ($this->connection->fetchAllKeyValue('SELECT LOWER(code), slug FROM departement') as $code => $slug) {
+            $this->slugsDepartement[$code] = $slug;
+        }
 
         $tout = (bool) $input->getOption('tout');
         $chemin = $this->chemin($input);
@@ -278,13 +332,28 @@ class ImportActeursCommand extends ImportTricoteusesCommand
             $acteur['uid'],
             $prenom,
             $nom,
-            $this->slug($prenom . ' ' . $nom),
+            $this->slugPersonne($prenom, $nom),
             $ident['civ'] ?? null,
             $this->age($acteur['etatCivil']['infoNaissance']['dateNais'] ?? null),
+            // État civil de la bio (« né le 25 septembre 1989 à Arras ») ; la
+            // ville arrive parfois vide de l'open data, la phrase s'en passe.
+            // `dateNais` est un horodatage ISO complet (« 1989-09-25T00:00:00+02:00 ») :
+            // on n'en garde que la date, MariaDB refuse le reste dans une colonne DATE.
+            isset($acteur['etatCivil']['infoNaissance']['dateNais'])
+                ? substr((string) $acteur['etatCivil']['infoNaissance']['dateNais'], 0, 10)
+                : null,
+            $this->texteOuNul($acteur['etatCivil']['infoNaissance']['villeNais'] ?? null),
             $acteur['profession']['libelleCourant'] ?? null,
             $groupe !== null ? ($idGroupes[$groupe['organesRefs'][0] ?? ''] ?? null) : null,
             $parti !== null ? ($idPartis[$parti['organesRefs'][0] ?? ''] ?? null) : null,
-            $departement !== null && $code !== null ? $this->slug($departement) . '-' . $code : null,
+            // `departement.slug` d'abord (cf. $slugsDepartement) ; la
+            // fabrication nom-code ne sert plus qu'aux codes que la table du
+            // legacy ignore. Le strtolower() enveloppe AUSSI le code : « 2B »
+            // doit devenir « 2b », sans quoi les routes ([a-z0-9\-]+) refusent
+            // la Corse sans qu'aucune requête SQL ne le montre.
+            $departement !== null && $code !== null
+                ? ($this->slugsDepartement[strtolower((string) $code)] ?? strtolower($this->slug($departement) . '-' . $code))
+                : null,
             $departement,
             $code,
             $this->entier($lieu['numCirco'] ?? null),
@@ -522,6 +591,19 @@ class ImportActeursCommand extends ImportTricoteusesCommand
         return $this->slugger->slug($valeur)->lower()->toString();
     }
 
+    /**
+     * Le slug de personne tel que datan.fr le sert : prénom et nom
+     * translittérés séparément (cf. $translitterateurNom), joints par le seul
+     * tiret garanti de l'adresse. Ne pas « simplifier » vers un slugger
+     * ordinaire : la ponctuation intérieure s'élide, elle ne se tiretise pas.
+     */
+    private function slugPersonne(string $prenom, string $nom): string
+    {
+        return $this->translitterateurPrenom->transliterate($prenom)
+            . '-'
+            . $this->translitterateurNom->transliterate($nom);
+    }
+
     private function age(?string $naissance): ?int
     {
         if ($naissance === null) {
@@ -533,5 +615,13 @@ class ImportActeursCommand extends ImportTricoteusesCommand
         } catch (\Exception) {
             return null;
         }
+    }
+
+    /** L'open data écrit parfois une chaîne vide là où l'information manque. */
+    private function texteOuNul(?string $texte): ?string
+    {
+        $texte = $texte !== null ? trim($texte) : null;
+
+        return $texte === '' ? null : $texte;
     }
 }

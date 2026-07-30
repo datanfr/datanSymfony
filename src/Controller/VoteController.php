@@ -4,6 +4,7 @@ namespace App\Controller;
 
 use App\Legislature;
 use App\Referencement\OpenGraph;
+use App\TypeVoteEdito;
 use Doctrine\DBAL\Connection;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\Response;
@@ -101,6 +102,7 @@ class VoteController extends AbstractController
                     l.name AS lecture_name,
                     dos.titre AS dossier_titre, dos.titre_chemin AS dossier_chemin,
                     dos.legislature AS dossier_legislature,
+                    dos.procedure_parlementaire AS dossier_procedure,
                     a.href AS amendement_href, a.expose AS amendement_expose,
                     a.resume_ia AS amendement_resume, a.resume_relu AS amendement_resume_relu
              FROM scrutin s
@@ -139,6 +141,18 @@ class VoteController extends AbstractController
 
         $response = $this->render('vote/individual.html.twig', [
             'scrutin' => $scrutin,
+            // « Type de vote » de l'encart Infos : le libellé éditorial du site
+            // (« amendement », « projet de loi »…) et son info-bulle, et non le
+            // code de scrutin de l'Assemblée. Cf. TypeVoteEdito.
+            'type_edito' => TypeVoteEdito::pour(
+                $scrutin['nature_vote'] ?? null,
+                $scrutin['dossier_procedure'] ?? null,
+            ),
+            // Navigation « Précédent / Tous les votes / Suivant » du pied de page :
+            // le scrutin voisin par numéro, en sautant les trous de numérotation.
+            'voisins' => $this->voisins($legislature, $numero, $prefixe),
+            // Carrousel « Les derniers votes décryptés par Datan » en pied de page.
+            'derniers_decryptes' => $this->derniersDecryptes(),
             // Le Congrès a sa propre numérotation, affichée « c1 » ; le signe du
             // numéro ne le dit pas, la table `scrutin` le stocke positif.
             'numero_affiche' => $numeroAffiche,
@@ -171,6 +185,53 @@ class VoteController extends AbstractController
         $response->setEtag(md5($response->getContent() ?: ''));
 
         return $response;
+    }
+
+    /**
+     * Scrutins voisins par numéro, pour la barre « Précédent / Suivant ».
+     *
+     * La numérotation a des trous (scrutins annulés) : l'application d'origine
+     * décrémente puis incrémente en boucle jusqu'à tomber sur un scrutin
+     * existant. Une seule requête suffit ici — MAX en dessous, MIN au-dessus.
+     *
+     * @return array{precedent: int|null, suivant: int|null}
+     */
+    private function voisins(int $legislature, int $numero, string $prefixe): array
+    {
+        $ligne = $this->connection->fetchAssociative(
+            'SELECT MAX(CASE WHEN numero < :numero THEN numero END) AS precedent,
+                    MIN(CASE WHEN numero > :numero THEN numero END) AS suivant
+             FROM scrutin
+             WHERE legislature = :legislature AND uid LIKE :prefixe',
+            ['legislature' => $legislature, 'numero' => $numero, 'prefixe' => $prefixe . '%'],
+        ) ?: [];
+
+        return [
+            'precedent' => isset($ligne['precedent']) ? (int) $ligne['precedent'] : null,
+            'suivant' => isset($ligne['suivant']) ? (int) $ligne['suivant'] : null,
+        ];
+    }
+
+    /**
+     * Les cinq derniers votes décryptés, pour le carrousel de pied de page.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function derniersDecryptes(): array
+    {
+        return $this->connection->fetchAllAssociative(
+            'SELECT d.title, d.legislature, d.vote_numero,
+                    s.date_scrutin, s.sort_code,
+                    c.name AS categorie_name, l.name AS lecture_name
+             FROM decryptage d
+             JOIN scrutin s ON s.id = d.scrutin_id
+             LEFT JOIN categorie c ON c.id = d.categorie_id
+             LEFT JOIN lecture l ON l.id = d.lecture_id
+             WHERE d.state = :published
+             ORDER BY s.date_scrutin DESC, d.vote_numero DESC
+             LIMIT 5',
+            ['published' => 'published'],
+        );
     }
 
     /**

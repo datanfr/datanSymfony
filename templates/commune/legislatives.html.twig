@@ -2,9 +2,10 @@
    circonscription (application/views/departement/commune.php:121).
 
    Deux coquilles du site sont corrigées ici — « présiedent » et « signifique »
-   — ainsi que le « après que … ait décidé », qui appelle l'indicatif. Le lien
-   vers l'article de blog est absolu vers datan.fr, comme sur le site : le blog
-   n'est pas porté, mais l'adresse existe et répond. #}
+   — ainsi que le « après que … ait décidé », qui appelle l'indicatif, et le
+   « de » écrit en dur devant le nom de la commune, qui donnait « la ville de
+   Ajaccio ». Le lien vers l'article de blog est absolu vers datan.fr, comme sur
+   le site : le blog n'est pas porté, mais l'adresse existe et répond. #}
 {% set premier = legislatives|first %}
 {% set candidat = premier.candidats|first %}
 {% set p = premier.participation %}
@@ -23,12 +24,12 @@
         <p class="text-primary font-weight-bold">L'élection à {{ ville.nom }}</p>
         {% if not pluriel %}
           {% if premier.tour == 1 %}
-            <p>Dans la ville de {{ ville.nom }}, il n'y a eu qu'un seul tour. Cela signifie que {{ candidat.prenom }} {{ candidat.nom|lower|capitalize }} a obtenu plus de la moitié des votes exprimés et au moins un quart des voix des inscrits.</p>
+            <p>Dans la ville {{ ville.de }}{{ ville.nom }}, il n'y a eu qu'un seul tour. Cela signifie que {{ candidat.prenom }} {{ candidat.nom|lower|capitalize }} a obtenu plus de la moitié des votes exprimés et au moins un quart des voix des inscrits.</p>
           {% endif %}
           <p>{{ ville.nom }} compte {{ p.inscrits|number_format(0, ',', ' ') }} inscrits sur les listes électorales. Seuls {{ p.votants|number_format(0, ',', ' ') }} habitants ont voté, soit un <b>taux de participation de {{ 100 - (p.inscrits ? p.abstentions / p.inscrits * 100 : 0)|round }} %</b>, comparé 67% au niveau national.</p>
           <p>{{ candidat.prenom }} {{ candidat.nom|lower|capitalize }} a récolté le plus grand nombre de voix à {{ ville.nom }} avec {{ candidat.voix|number_format(0, ',', ' ') }} votes, soit {{ candidat.part|round }}% des suffrages.</p>
         {% else %}
-          <p>{{ ville.nom }} étant une ville de taille importante, elle compte plusieurs députés. Découvrez ci-dessous les parlementaires élus pour la ville de {{ ville.nom }}.</p>
+          <p>{{ ville.nom }} étant une ville de taille importante, elle compte plusieurs députés. Découvrez ci-dessous les parlementaires élus pour la ville {{ ville.de }}{{ ville.nom }}.</p>
         {% endif %}
       </div>
       <div class="{{ pluriel ? 'col-lg-12 justify-content-around' : 'col-lg-5 justify-content-center' }} mt-4 d-flex flex-wrap bloc-elections">

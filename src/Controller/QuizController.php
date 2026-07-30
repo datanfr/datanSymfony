@@ -76,8 +76,13 @@ class QuizController extends AbstractController
      * Les trois derniers votes décryptés, comme `get_most_famous_votes(3)`.
      *
      * L'application d'origine ordonne par `votes_info.voteNumero DESC` ; notre
-     * équivalent est `scrutin.numero`, et le tri rend les trois mêmes scrutins
-     * que la base de production interrogée à neuf (le PLFSS 2026, décembre 2025).
+     * équivalent est `scrutin.numero`. Le tri est donc le même, mais les trois
+     * scrutins rendus ne sont pas ceux de datan.fr : la table `decryptage` vient
+     * d'un instantané du backup public, en retard de quelques publications sur
+     * la production (238 décryptages contre 240 affichés par `/soutenir`). Les
+     * décryptages manquants portant les numéros les plus hauts, ils occupent les
+     * premières places là-bas et décalent notre liste d'autant. Ce n'est pas un
+     * défaut de tri : la liste se réaligne d'elle-même à la reprise du contenu.
      * Le titre affiché est celui de la rédaction (`decryptage.title`), pas
      * l'intitulé brut du scrutin. Aucun lien n'est construit ici : les titres
      * sont du texte, la page ne renvoie pas vers les fiches de vote.

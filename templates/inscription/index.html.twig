@@ -61,6 +61,7 @@
                       Bonjour {{ depute.firstname }} {{ depute.lastname }}. Choisissez votre pseudo et votre mot de passe pour activer votre compte.
                     </div>
                   {% else %}
+                    {# « veuillez d'aborder demander » sur le site : coquille. #}
                     <div class="alert alert-danger">
                       Attention, <b>si vous êtes député</b>, veuillez d'abord demander un lien d'activation en <a href="{{ path('demande_compte_depute') }}">cliquant ici.</a>
                     </div>
@@ -83,6 +84,8 @@
                            value="{{ valeurs.name|default('') }}" {{ est_depute ? 'readonly' }}>
                   </div>
                   {% if not est_depute %}
+                    {# Le site propose « 7500 » : un code postal français en compte
+                       cinq, l'exemple est tronqué. #}
                     <div class="form-group">
                       <label class="font-weight-bold">Code postal</label>
                       <input type="text" class="form-control" name="zipcode" placeholder="75001"
@@ -90,10 +93,12 @@
                     </div>
                   {% endif %}
                   <div class="form-group">
-                    <label class="font-weight-bold">Adresse électronique</label>
-                    <input type="email" class="form-control" name="email" placeholder="jean.dupont@example.com"
+                    <label class="font-weight-bold">Adresse email</label>
+                    <input type="email" class="form-control" name="email" placeholder="jean.dupont@gmail.com"
                            value="{{ valeurs.email|default('') }}" {{ est_depute ? 'readonly' }}>
                   </div>
+                  {# « (maximum 10 characters) » sur le site : la seule mention en
+                     anglais de tout le parcours de compte. #}
                   <div class="form-group">
                     <label class="font-weight-bold">Pseudo <span class="font-italic font-weight-normal">(dix caractères maximum)</span></label>
                     <input type="text" class="form-control" name="username" placeholder="jeandupont"
@@ -108,14 +113,16 @@
                     <input type="password" class="form-control" name="password2" autocomplete="new-password">
                   </div>
                   <input type="hidden" name="_token" value="{{ csrf_token('inscription') }}">
-                  <button type="submit" class="btn btn-primary btn-block">Confirmer</button>
+                  <button type="submit" class="btn btn-primary btn-block">Confirmez</button>
                   <p class="mt-4">Déjà un compte sur Datan ? <a href="{{ path('connexion') }}">Connectez-vous</a></p>
                   {% if not est_depute %}
+                    {# Accord de la négation, comme sur la connexion. #}
                     <p>Vous êtes député et n'avez pas encore de compte Datan ? <a href="{{ path('demande_compte_depute') }}">Demandez-le !</a></p>
                   {% endif %}
                 </div>
               {% endif %}
             </div>
+            {# Année courante là où le site a figé « 2020 » en dur — cf. connexion. #}
             <div class="col-lg-8 col-md-10 col-10 offset-lg-2 offset-md-1 offset-1 login_credits pt-3 mt-4">
               <p>© Datan {{ 'now'|date('Y') }} - Tous droits réservés</p>
             </div>

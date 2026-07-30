@@ -1,799 +1,505 @@
 # Reste à faire
 
-État au 22 juillet 2026. Les conventions et les pièges métier sont dans
-`CLAUDE.md` ; ce fichier ne liste que le travail restant.
+État au 30 juillet 2026, après les deux passes menées à cinq les 29 et
+30 juillet : tout ce qui est livré **et vérifié** a été retiré — le détail des
+chantiers soldés est dans l'historique git de ce fichier. Les conventions et les
+pièges métier sont dans `CLAUDE.md`. La comparaison visuelle à datan.fr est
+**close** : périmètre public et écrans publics de connexion sur captures,
+espace connecté profond sur le code du legacy (cf. §4).
 
-Le périmètre de référence est `../datan/application/config/routes.php` : toute
-adresse publique qu'il sert et que nous ne servons pas est un trou, sauf mention
-contraire ci-dessous.
+Le périmètre de référence (`../datan/application/config/routes.php` et le
+`.htaccess`) est couvert : chaque adresse publique du legacy est servie,
+redirigée en 301, ou écartée pour une raison consignée au §3.
 
-## 1. Défauts ouverts
+## 1. Chantiers restants
 
-À corriger avant d'ajouter des pages : ce sont des adresses qui répondent mal
-aujourd'hui.
+- [ ] **Le troisième score de participation, « Votes par spécialisation ».**
+      Participation aux scrutins portant sur des textes examinés dans la
+      commission du député (`class_participation_commission` du legacy). La
+      voie est mesurée : la donnée existe dans les dépôts Tricoteuses — l'acte
+      `AN1-COM-FOND` porte l'`organeRef` de la commission au fond, 1 662
+      dossiers de la 17e, soit 7 275 scrutins sur 8 434 (86 %), couverture
+      comparable à celle du legacy. Livrer demande une migration
+      (`dossier.commission_fond`), une reprise d'`ImportDossiersCommand` et un
+      rejeu de cet import ; le type de classement, le calcul et l'onglet des
+      deux pages de participation sont ensuite mécaniques. Le texte continue
+      d'annoncer « deux scores » tant que le troisième n'existe pas —
+      l'annoncer sans l'onglet serait pire.
+- [ ] **Professions de foi : la table est vide, les PDF manquent.** Le bloc
+      « Ses professions de foi » de la fiche est porté
+      (`depute/_professions_foi.html.twig`) et son import écrit
+      (`app:import:professions-foi`), mais `profession_foi` est **vide dans le
+      backup public** et les PDF (`assets/data/professions/election_*/`) ne sont
+      pas dans nos assets. À rejouer contre la vraie base au déploiement (§2),
+      avec la copie du répertoire d'assets. D'ici là le bloc reste masqué.
+- [ ] **Municipales 2026 sur les fiches et l'accueil.** datan.fr affiche un
+      encart « Municipales 2026 » en tête de fiche de **député** comme de
+      **groupe** (où il compte les candidats du groupe), et une section sur
+      l'accueil (311 députés candidats). Le legacy les tient sous une élection
+      `id = 7` absente de son propre catalogue : c'est son chantier en cours, à
+      porter avec le domaine électoral, pas avant (cf. §3).
+- [ ] **HATVP : dernier métier déclaré.** Le legacy ajoute au bloc métier un
+      paragraphe et une modale sur les activités déclarées à la HATVP. La table
+      `hatvp` du backup public est **vide (0 ligne)** : même traitement que les
+      professions de foi.
+- [ ] **Bloc « L'auteur de l'amendement » sur la page de vote.** datan.fr affiche
+      une carte d'auteur (député, ou « Gouvernement Lecornu ii ») sous le vote
+      d'un amendement. `amendement.signataires` est vide dans notre import et
+      l'open data ne publie pas l'auteur d'amendement : le legacy le **scrape**
+      sur `assemblee-nationale.fr/dyn/` (cf. CLAUDE.md). Même chantier que le
+      lien scrutin → amendement.
+- [ ] **« a voté en faveur de du projet de loi immigration »** : la préposition
+      doublée vient du texte de `VOTES_CLES`, composé comme au legacy —
+      datan.fr l'affiche aussi. Notre règle d'arbitrage (un défaut se corrige)
+      dit de composer la phrase sans le doublon, avec le commentaire d'usage ;
+      reproduite pour l'instant.
+- [ ] **Statistiques d'une législature passée (`/legislature-N`).** datan.fr
+      affiche participation, loyauté et proximités pour la législature consultée ;
+      nous nous taisons, `vote` ne couvrant que la 17e (plus les deux scrutins-clés
+      de la 16e importés par `app:import:votes-cles`). Lever cet écart demande
+      d'importer les votes nominatifs des législatures 14 à 16 (dépôts
+      `Scrutins_XIV/XV/XVI_nettoye`, ~3 M de lignes) — décision de volumétrie à
+      prendre, pas un défaut de portage.
+- [ ] **Le bloc « En savoir plus » d'un groupe est prêt à poser.** Rien à
+      importer : côté legacy c'est un **switch codé en dur sur le sigle**
+      (`Groupes_model::get_groupe_social_media()`, lignes 321-427 — site, X,
+      Facebook, Wikipédia pour une vingtaine de groupes). Le porter, c'est
+      transcrire ce switch dans une classe à côté d'`EditoGroupe`, qui fait
+      déjà exactement cela pour les textes de création, et rendre le bloc en
+      pied de **fiche** (pas sur la page statistiques) avec `url_obf`.
+- [ ] **Trois retouches sur les pages de groupe.** La section « Coalitions » de
+      la page statistiques est chez nous et pas sur le site, qui ne la sert que
+      sur la fiche — seul écart de structure restant, hérité d'une consigne de
+      la passe du 30 juillet (« n'y retouche pas ») : à retirer, ou à assumer
+      en le commentant. La carte de profil du groupe NI écrit « Non
+      inscrit » où le site écrit « Députés non inscrits » (son `CASE WHEN`) —
+      une ligne dans `carte_profil.html.twig`. Et la page statistiques écrit
+      la cohésion « 0.95 » avec un point quand les pages de classement ont
+      adopté la virgule française : nos propres pages ne suivent pas la même
+      règle, l'une des deux doit céder.
+- [ ] **Les photos détourées de datan.fr ne sont pas dans ce dépôt.** Le site
+      sert un portrait détouré, recadré carré en 240 × 240 depuis la 17e
+      (`assets/imgs/deputes_original/`) ou en 150 × 192 avant
+      (`assets/imgs/deputes_nobg/`), plus leurs variantes webp. Nous n'avons que
+      le portrait brut de l'Assemblée publié par `app:import:photos` : le cadre
+      carré le rezoome sur le visage, ce qui se voit sur **chaque carte du
+      site**, et les législatures passées tombent presque toutes sur le visage
+      générique — le dépôt des Tricoteuses ne couvre que les députés actuels.
+      `PhotoExtension` cherche désormais les jeux détourés en premier : le jour
+      où les dossiers sont là, la parité est acquise sans toucher au code. Ils
+      pèsent une centaine de mégaoctets, ne se régénèrent pas (détourage fait à
+      la main) et ne vivent que sur le serveur : **à recopier au déploiement**,
+      comme les PDF des professions de foi.
+- [ ] **70 scrutins de la 17e restent sans rattachement complet** (22 sans
+      amendement, 48 sans dossier) après `app:lien:scrutins`. Le recours,
+      `app:scraper:scrutins --relance`, a été rejoué le 30 juillet : 70 pages
+      visitées, **zéro gain** — 19 pages sans aucun lien d'amendement, 3
+      numéros discordants, et les pages des sans-dossier n'offrent rien non
+      plus. L'écart est chez la source : l'Assemblée n'a pas complété ses
+      pages. À relancer de loin en loin, rien à corriger chez nous.
+- [ ] **`simplicite_ia`** : la colonne « Simplicité » de l'écran des amendements
+      s'affiche « — » tant que la génération IA ne la produit pas (le legacy la
+      rend en étoiles 1-5). À brancher dans `app:ia:resumes-amendements` le jour
+      où le modèle de production est choisi.
+- [ ] **Résumés d'amendements en lot** (`app:ia:resumes-amendements`) : à lancer
+      sciemment **après** le choix d'`IA_MODELE` de production — la garde
+      « jamais écraser un résumé existant » fait qu'un lot passé au modèle
+      d'essai local bloquerait pour toujours un lot plus propre.
 
-- [x] **Les députés corses sont en 404** — **corrigé le 23 juillet.** La
-      parenthèse de `ImportMandatsCommand.php:101` fermait avant le code
-      (`haute-corse-2B`) : le `strtolower()` enveloppe désormais la
-      concaténation entière. Données réalignées par `UPDATE … LOWER(dpt_slug)`
-      (strictement équivalent à un réimport, le slug étant dérivé) : 12 lignes.
-      Vérifié par HTTP : les 12 fiches répondent 200 et figurent aux deux plans
-      de députés — le filtre de `SitemapController`, écrit sur le motif de la
-      route, s'est effacé de lui-même et reste en garde.
-- [x] **995 députés n'ont pas de `dpt_slug`** — **404 depuis le 23 juillet.**
-      L'enquête a tranché le « soit… soit » : ces 995 lignes n'ont **aucun
-      mandat** (995 = 3 117 députés − 2 122 avec mandats) — ce sont des acteurs
-      du dépôt Tricoteuses qui n'ont jamais siégé à l'Assemblée (sénateurs :
-      Tasca, Antiste, Loueckhoté…). La production ne publie que les 2 119
-      acteurs de sa table `deputes_last` : il n'y a **rien à reconstituer**,
-      leur page n'a jamais existé. Garde `dpt_slug IS NULL → 404` posée dans
-      `DeputeController::individual()` et `depute()` (donc `/votes` et
-      `/legislature-N` aussi). Vérifié : fiche et sous-pages en 404.
-      **Affinée le 23 juillet** après le balayage de l'agent des données : un
-      slug de député n'est pas unique (le député Jean-Louis Masson, Var,
-      partage le sien avec un sénateur homonyme sans page ; idem
-      `beatrice-descamps`), et le `LIMIT 1` pouvait tirer l'homonyme et
-      404-iser un vrai député que le plan annonçait. À slug égal, la ligne
-      avec `dpt_slug` gagne (`ORDER BY (dpt_slug IS NULL)`), les deux fiches
-      revérifiées en 200.
-- [x] **`depute_legislature` n'a pas de garde de législature** — **corrigé le
-      23 juillet.** Seuil `Legislature::PREMIERE` posé comme dans
-      `VoteListController::liste()` ; `legislature-12/13` répondent 404,
-      `legislature-14` toujours 200. Le bloc « Ses autres mandats » de
-      `depute/legislature.html.twig` cite désormais les mandats pré-14e **sans
-      les lier** (il fabriquait des liens morts vers ce que la garde ferme).
+## 2. Au déploiement
 
-- [ ] **Les fiches des Français de l'étranger vivent à la mauvaise adresse.**
-      Découvert le 25 juillet en portant les redirections du `.htaccess` : la
-      redirection canonique de `DeputeController::individual()` (et le plan de
-      députés, et tout lien interne) suit `depute.dpt_slug` — le slug
-      **fabriqué** (nom + code), qui pour les Français de l'étranger donne
-      `francais-etablis-hors-de-france-099` quand datan.fr sert
-      `francais-de-letranger` (la cible Yadan du `.htaccess` le prouve). Le
-      piège des « deux jeux de slugs » de CLAUDE.md : cinq départements
-      divergent, leurs députés sont donc indexés chez nous à des adresses que
-      le site vivant n'a jamais servies. À corriger en dérivant `dpt_slug` de
-      `departement.slug` (la table du legacy) quand le code y figure — puis
-      revérifier fiches, plans et sitemap. Confié à l'agent de la fiche député.
+Rien à coder d'avance ; à dérouler le jour J, dans cet ordre de préférence.
 
-## 2. Référencement
+- [ ] **Variables de production** : `MATOMO_URL=https://matomo.datan.fr`,
+      `GTM_ID=GTM-K3QQNK2`, `MAILER_DSN` réel, `IA_MODELE` — et la clé
+      `ANTHROPIC_API_KEY` dans `.env.local`, **jamais** dans `.env`. Revérifier
+      alors le texte des mentions légales avec la pile de suivi réellement active.
+- [ ] **Rejouer les imports de récupération contre la vraie base** — le backup
+      public est réduit et anonymisé : `app:import:utilisateurs` (tous les
+      comptes, `users_mp`, mots de passe repris tels quels), les auteurs du
+      blog, `campaigns` et `newsletter` (vides dans le backup — **transvaser les
+      abonnés réels avant l'ouverture**), `app:import:professions-foi` **avec la
+      copie du répertoire `assets/data/professions/`**, et les décryptages
+      (`app:import:decryptages`, 250 au 15/07/2026 dans le backup public — la
+      vraie base en a davantage). Un import de récupération écrase les écritures
+      locales : à ne jamais planifier.
+- [ ] **Purger les comptes d'essai** : `redaction`, `editeur`, `guibert`.
+- [ ] **Courriels** : le legacy compose en MJML (`qferr/mjml-php`) et envoie par
+      Mailjet — newsletter mensuelle (`newsletter/votes`, CLI), transactionnels,
+      `/newsletter/edit/{email}` + `/newsletter/delete`, courriel d'activation
+      du compte député (aujourd'hui le lien s'affiche à l'administrateur pour
+      transmission manuelle).
+- [ ] **Pile anti-spam** : captcha et pénalité anti-force-brute (inscription,
+      demande de compte député, mot de passe oublié).
+- [ ] **Publication data.gouv** (`opendata()` de `daily.php`) : les jeux CSV que
+      notre pied de page pointe. À replanifier, hors `app:sync:quotidien`.
+- [ ] **Planification** : `bin\planifier-sync.ps1` (sync quotidien) ;
+      `app:calcul:statistiques-deputes` **après chaque import de votes** (hors
+      sync) ; `app:moissonner:bluesky` à la demande.
+- [ ] **Niveau serveur** : redirection https (le hook `ssl.php` du legacy y est
+      resté) ; si des tiers consomment l'ancienne API (`api/tables`,
+      `api/votes`, `api/exposes`…), poser des redirections — API Platform ne
+      reprend pas ce découpage.
+- [ ] **Héberger en propre le fond du Palais Bourbon** : la page de connexion
+      pointe un fichier Wikimedia, dépendance héritée du legacy.
 
-**Chantier livré le 23 juillet.** Le mécanisme vit dans `base.html.twig` (qui
-fabrique toutes les balises depuis des valeurs sûres) + `App\Referencement\OpenGraph`
-(les cartes composées) + `partials/fil_ariane.html.twig`. Ce que doit savoir
-quiconque ajoute une page :
+## 3. Abandonné sciemment — ne pas y revenir
 
-- **le bloc `meta_description` ne contient plus que du TEXTE** — la balise est
-  fabriquée par `base.html.twig`, qui ressert le même texte à `og:description`
-  et `twitter:description` (les 42 gabarits ont été refondus en ce sens) ;
-- **`fil_ariane`** : passer du contrôleur une liste de `{nom, url}` — dernier
-  maillon actif par défaut, `actif: false` pour le forcer en lien (cas de
-  l'article de blog). Rendu **en bas de page**, comme l'origine, + JSON-LD
-  `BreadcrumbList` dans le `<head>` ;
-- **`ogp`** : uniquement pour les pages à visuel dédié (député, groupe, scrutin,
-  article) — sans lui, carte générique au logo 1200×630, comme l'origine.
+- **Le maire d'une commune** : `cities_mayors` vide dans notre copie, et la
+  donnée de production a dérivé (« Hubert De jenlis »). Une donnée fausse ne
+  vaut pas mieux qu'une absente.
+- **Les tables `elect_bv_*`** (grain bureau de vote, jamais écrites) et les
+  **municipales 2026** (élection `id = 7` absente du catalogue legacy) : le
+  chantier en cours du legacy, pas une donnée à porter. Conséquence directe : le
+  bandeau **`electionFeature` (« Municipales 2026 »)** ne peut s'afficher ni en
+  tête de fiche de député, ni en tête de fiche de **groupe** (où il compte les
+  candidats du groupe), ni sur l'accueil. C'est le seul écart visible restant
+  sur la fiche d'un député candidat.
+- **La modale de première visite** : éditorial daté, codé en dur, éteinte à la
+  source. (Le **`voteFeature`** — l'encart « dernier vote important » — est en
+  revanche bien porté : datan.fr l'affiche, il n'était pas éteint. Cf. §4.)
+- **La phrase « famille professionnelle » de la bio** : présente dans la vue du
+  legacy (`_bio.php:110`), mais `Deputes.php:216` a commenté l'appel qui la
+  nourrit et passe `null` — datan.fr ne l'affiche donc jamais (vérifié sur le
+  site vivant le 30/07/2026). L'omettre est la parité, et `ProfilSocial` portant
+  la donnée n'y change rien : même famille d'extinction à la source que la
+  modale ci-dessus. Commenté dans `depute/_bio.html.twig`.
+- **`/commissions`** : la page du legacy est un « en construction » de 2,6 Ko
+  sans en-tête ni pied — rien à imiter. La nôtre est donc une création propre,
+  sans référence : ce qui s'y casse est un défaut de ce dépôt, pas un écart de
+  portage, et ne se compare à rien.
+- **Le générateur d'iframe du dashboard député** : `show_404()` à la source.
+- **`admin/api-keys`** (caduc : le seul client était PoliticAnalysis, la
+  génération est interne depuis le 24 juillet), **`admin/elections/*`**
+  (fenêtre de candidatures close depuis 2022), **`admin/votes`** (doublon du
+  CRUD des décryptages).
+- **`get_questions_api` du quiz** (branché sur aucune route) et la table
+  **`questions`** parlementaires (code mort des deux côtés ; si une page naît
+  un jour, c'est un import open data Tricoteuses, pas une récupération).
+- **`/redirect/cities/{code}/{dpt}`** : 404 sur datan.fr même.
+- **`pfaciana/tiny-html-minifier`** : au composer du legacy, introuvable à
+  l'usage.
 
-Détail des quatre points, tous vérifiés côte à côte avec datan.fr :
+## 4. Points de vigilance sur l'existant
 
-- [x] **`canonical`** sur toute page, auto-référente comme l'origine mais **sans
-      la chaîne de requête** (le legacy recopie REQUEST_URI entier, `?page=2`
-      compris — défaut corrigé, commenté dans le gabarit).
-- [x] **Open Graph + Twitter Cards** : les quatorze balises sur toutes les
-      pages ; cartes composées par `og-image-datan.vercel.app` (le générateur de
-      la production, toujours en service) pour député (fiche + historique),
-      groupe, scrutin décrypté et explication mise en avant — adresses
-      identiques au vivant à l'octet près (espaces seuls encodés `%20`, accents
-      bruts : ne pas « corriger » en `rawurlencode`). `profile:first_name/last_name`
-      sur les fiches. Le titre d'un vote final non décrypté suit la règle de
-      l'origine (« … - Vote final » sur le dossier).
-- [x] **Fil d'Ariane partout** où l'origine en rend un — donc ni sur l'accueil
-      ni sur les commissions (vérifié en vivant). Noms repris à l'identique, y
-      compris les incohérences voulues (« 16ème législature » côté députés,
-      « 16e » côté votes) ; deux coquilles corrigées et commentées : `ListItem`
-      (le legacy émet « listItem », que schema.org ignore) et l'accent
-      d'« Historique 16e législature ». **Les pages `/elections` ont désormais
-      le leur** (24 juillet), câblé sur ce mécanisme d'après les fils de
-      `Elections.php` : « Datan › Élections », suivi selon la page du scrutin
-      (« Législatives 2022 »), du département (« Rhône (69) ») ou de la commune.
-      Paris n'a pas de maillon de département sur sa fiche de ville d'élection —
-      sa page de département rend 404 —, comme le legacy. `/parrainages-2022` en
-      rend un aussi (« Datan › Parrainages 2022 ») ; son URL de JSON-LD pointe la
-      vraie adresse, là où le legacy écrit `/parrainages` (404). Le simulateur de
-      coalition n'en a pas, le contrôleur d'origine n'en produisant pas. Aucune de
-      ces pages n'a de carte Open Graph dédiée (logo générique, comme le legacy).
-- [x] **Redirections 301 du `.htaccess`** — **portées le 25 juillet**
-      (`RedirectionLegacyController`). Le legacy ne tient pas tout son contrat
-      d'URL dans `routes.php` : `.htaccess.dist:24-60` porte les adresses
-      d'avant la mise en législatures (2022), indexées depuis des années —
-      `votes/vote_N` et `votes/all…` → `legislature-15`, les 17 adresses
-      courtes de groupes (`/groupes/soc`…, énumération en contrainte de route
-      pour ne pas avaler `legislature-N`), trois députés déménagés (Sas,
-      Lucas-Lundy, Yadan — `priority: 2`, sinon `depute_individual` les avale),
-      les votes filtrés (`…/votes/{champ}` → `/votes`, lookahead qui épargne
-      le vrai `/votes/all` des groupes), `dashboard-mp` → `dashboard` (le
-      motif du pare-feu resserré en `^/dashboard(/|$)`, sans quoi il capturait
-      l'ancienne adresse avant le 301). Slash final : Symfony le retire
-      nativement en 301 ; doubles slashes (hook `urlValidator`) : aucune route
-      ne les accepte, 404 naturel. Tout vérifié en prod, y compris les
-      non-captures (vraies pages en 200).
-- [x] **Page 404** : `templates/bundles/TwigBundle/Exception/error404.html.twig`.
-      Attention, la description qui figurait ici était fausse — le
-      `404_override` « errors/page_missing » du legacy est **commenté** dans
-      routes.php ; ce que datan.fr sert réellement (vérifié en vivant) est la
-      page turquoise autonome de `views/errors/html/error_404.php`, sans
-      en-tête ni pied de page. C'est elle qui est portée, et elle sert en prod
-      (cache reconstruit et vérifié par HTTP).
-- [x] **Obfuscation du maillage interne des communes** (23 juillet). Le site
-      masque aux robots les adresses des petites communes — préfixe leurre +
-      ROT13 décodé au clic (`url_obf2.js`, chargé par `base.html.twig` et
-      interdit aux moteurs par `robots.txt`). Reproduit via la fonction Twig
-      `url_obf()` : liste alphabétique d'un département d'élections (seuil
-      500 hab ; les quinze pastilles, déjà en clair, ne sont pas doublées),
-      « Voir la page commune » (seuil 4 000), communes voisines (toujours,
-      sur les deux fiches de ville), Paris au pied des pages d'élections
-      (déjà en clair parmi les grandes communes). Les liens **externes**
-      restent en clair avec `rel="nofollow"` — divergence assumée, commentée
-      en tête de `classement/deputes-origine-sociale.html.twig`. Notre
-      décodeur corrige au passage l'accessibilité (focus + clavier) et cible
-      l'attribut `url_obf`, pas la classe, qui habille aussi de vrais liens.
-- [x] **Le pied de page est obfusqué hors accueil** — **tranché et porté le
-      24 juillet**, en parité (c'est un choix de sculpture du crawl, pas un
-      défaut) : À propos, Newsletter, Connexion, Mentions légales, quatre
-      réseaux sociaux, data.gouv et GitHub deviennent des `span url_obf` hors
-      de `/`, le reste demeure en clair partout (footer.php:71-207, vérifié en
-      vivant sur datan.fr/faq). Le pied de page a été remis en parité complète
-      au passage : cinq réseaux et non deux (Bluesky reste un vrai lien dans
-      les deux branches — laissé tel quel au legacy après son ajout, reproduit),
-      bandeau data.gouv/GitHub, ligne de copyright, bloc « Nous contacter »,
-      images en chargement paresseux ; le lien « Commissions », que le legacy
-      n'a pas, est retiré. Le PNG Facebook (au lieu du SVG) de la branche
-      masquée est une coquille du site, reproduite et commentée.
-
-## 3. Pages publiques non portées
-
-Éditorial simple — même moule que `/statistiques/aide`, aucune donnée :
-
-- [x] `/a-propos`, `/mentions-legales`, `/soutenir` — **portées** (22 juillet).
-      **Cette liste est close** : la route fourre-tout `(:any) -> pages/view/$1`
-      du legacy ne sert pas une table administrable mais des fichiers de vue, et
-      il n'y en a que quatre — le quatrième, `statistiques.php`, est déjà porté
-      en `/statistiques/aide`. Rien ne se cache derrière ce fourre-tout. Le
-      contrôleur legacy prépare aussi un titre pour `contact`, mais le fichier de
-      vue n'existe pas : l'adresse répond 404 sur datan.fr, il n'y a rien à
-      porter.
-      Les cinq liens du menu et du pied de page qui menaient à ces pages
-      (« Nous soutenir », « À propos » ×2, « Dons », « Mentions légales ») sont
-      désormais câblés dans `base.html.twig` (23 juillet). Un point reste en
-      attente d'un autre chantier :
-      - **Le texte des mentions légales décrit des cookies que nous ne posons
-        pas** : Tarte au citron, Google Analytics, Matomo. Il est repris tel quel
-        — c'est un document juridique, pas une page à réécrire —, mais il devra
-        être confronté à la réalité du déploiement avant mise en ligne. Le site
-        pose aussi `pg-mentions` sur `<body>`, dont l'unique effet est de faire
-        apparaître l'icône de Tarte au citron : sans le gestionnaire, la classe
-        n'a rien à montrer.
-- [x] `/faq` (`Faq.php`) — **portée** (23 juillet). Deux entités (`FaqCategorie`,
-      `FaqPost`), une migration, `app:import:faq` sur le socle, et le gabarit
-      `faq/index.html.twig` : bandeau vert, recherche client (`#searchfaq`, déjà
-      câblée dans `main.js`), accordéon Bootstrap par catégorie. **6 catégories et
-      11 questions récupérées, 10 publiées** — le brouillon (id 3) est conservé
-      comme donnée mais masqué de la page publique. Faute de colonne de tri dans la
-      source, l'ordre d'origine est repris de l'identifiant (`ordre`) ; la page ne
-      montre que les 3 catégories ayant au moins une question publiée (2, 3, 4). Le
-      jeton `[[ageMean]]` d'une réponse est résolu **au rendu** par l'âge moyen des
-      députés en exercice (52 ans), comme le legacy, et non figé à l'import.
-      **Reste** : le JSON-LD `FAQPage` (`Faq_model::get_faq_schema()`), laissé au
-      chantier des balises structurées. Le lien « Foire aux questions » du pied de
-      page (§5) peut désormais viser `/faq`.
-
-Avec données :
-
-- [x] `/elections`, `/elections/{slug}`, `/elections/resultats/{dpt}`,
-      `/elections/resultats/{dpt}/ville_{commune}` — **portées et vérifiées**
-      (23 juillet). `ElectionController`, gabarits `templates/election/**`, les
-      deux blocs de résultats de la fiche de ville (`templates/commune/*`) et les
-      trois sitemaps d'élections. Vérifié sur un serveur prod unique, comparé à
-      datan.fr et à la base : les quatre adresses en 200
-      (`/elections/resultats/paris-75` en 404 comme le legacy), cache
-      `s-maxage=3600`, HIT ~25 ms ; Villeurbanne reproduit au chiffre près
-      (Amard 25 352 / 92 020 / 53 827).
-      **Défauts corrigés** (parité rétablie face à datan.fr) :
-      - **Corse non traduite sur `/elections/legislatives-2022`.** `candidature.district`
-        écrit « 2a »/« 2b » mais `departement.code` « 2A »/« 2B » : le lookup PHP,
-        sensible à la casse là où une jointure ne l'est pas, faisait tomber les
-        candidats corses sur le repli « nom de département ». Lookup en minuscules,
-        casse canonique rendue partout (« Haute-Corse (2B) ») — le legacy garde ses
-        minuscules, écart assumé.
-      - **Ordre des cartes sur `/elections`.** Le site classe année décroissante
-        puis identifiant croissant (européenne avant législative de 2024) ; nous
-        triions par date. Corrigé dans `ElectionRepository::toutes`.
-      - **Double arrondi des % législatifs.** `legislativesParCommune` pré-arrondissait
-        à deux décimales avant le `|round` des gabarits : Braun-Pivet (49,4977 %)
-        sortait à 50 au lieu de 49. Part rendue brute, arrondie une seule fois.
-      - **Filtre « par groupe » de legislatives-2022**, vide en production (défaut
-        du legacy), désormais renseigné (12 groupes, options ↔ classes `gp-*`).
-      **Écarts assumés** (choix, non défauts) :
-      - **`/elections/resultats/{dpt}/ville_{commune}`.** Le legacy la sert creuse
-        (`elect_bv_*` vides, cadrage municipales 2026 hors périmètre) ; nous y
-        servons les résultats législatifs par circonscription depuis
-        `resultat_legislative`, plutôt qu'une page vide (choix confirmé, documenté).
-      - **24 communes à slug parenthésé** (`ollieres-sur-eyrieux-(les)`…). datan.fr
-        renvoie 400 (parenthèses rejetées en amont) ; nous **les servons** en 200
-        avec leurs données (choix confirmé), mais **hors sitemaps** — les 5 de plus
-        de 500 hab retirées de `sitemap-elections-v` (16 553 URLs). `SLUG_COMMUNE`
-        reste ouvert aux parenthèses.
-      - **Pied de `/elections`.** Le legacy regroupe les communes vedettes par nom
-        et classe le groupe sur une population indéterminée, ce qui sort Saint-Denis
-        (Réunion) des trente ; nous classons chacune sur sa propre population, et
-        Saint-Denis reprend son 20e rang. La nôtre est la plus juste.
-      - **Coquilles corrigées et commentées** : espace devant « % » dans les barres
-        de la présidentielle 2022 (le site écrit « 41% »), accord « arrivée » et mot
-        « départemental » aux départementales 2021.
-- [x] **Résultats de la circonscription sur la fiche d'un député** — **portés**
-      (23 juillet). Trois entités (`ResultatCirconscription`,
-      `ParticipationCirconscription`, `PartielleLegislative`), une migration,
-      `app:import:circonscriptions` sur le socle, et le bloc « Son élection »
-      (`depute/_election.html.twig`). **Comptes : 2 227 participations, 7 442
-      résultats, 361 partielles — toutes reprises, 0 écartée.** Deux pièges de la
-      source réparés à l'import : le **double encodage UTF-8** des noms
-      (« Ã‰ric » stocké pour « Éric » — réparé en relisant en Windows-1252), et
-      les **deux façons de nommer** — nom complet dans `candidat` jusqu'en 2022,
-      éclaté en `nameLast` (capitales) / `nameFirst` en 2024, le nom remis en casse
-      de titre (« SAINTE-MARIE » → « Sainte-Marie », là où le legacy le mange en
-      « Sainte-marie »). La règle de substitution partielle → élection générale, le
-      regroupement « Autres candidats » au 1er tour et la participation (comparée à
-      la moyenne nationale codée en dur) vivent dans
-      `ResultatCirconscriptionRepository`. Coquille legacy « supérieux » corrigée en
-      « supérieur », et le `</^p>` malformé de la vue refermé. Le nom du député lève
-      l'ambiguïté quand la circonscription a connu une partielle ; un suppléant qui
-      a pris le relais sans partielle n'a pas de bloc, comme sur datan.fr.
-- [x] `/blog`, `/blog/{categorie}/{slug}`, `/blog/categorie/{slug}` — **portées
-      le 23 juillet** (`BlogController`, gabarits `blog/`), avec les deux
-      derniers sitemaps (`sitemap-posts-1.xml`, `sitemap-categories-1.xml` — les
-      quatorze plans sont désormais tous servis, chaque adresse vérifiée en 200).
-      Trois choses apprises en route :
-      - **Les sous-titres et descriptions des rubriques ne sont pas en base** :
-        le legacy les code en dur dans `libraries/Blog.php` (sa table
-        `categories` n'a que nom et slug). Repris tels quels en constante de
-        `BlogController`.
-      - **Les images des articles étaient absentes de nos assets.** La base
-        référence des noms suffixés d'un horodatage d'upload
-        (`img_post_6_1754771726`) qui n'existent ni dans notre copie ni dans le
-        dépôt legacy — la production les fabrique à l'upload. Les 18 jeux
-        (base + variantes -360/-420/-730/-1240 + WebP, 162 fichiers) ont été
-        récupérés depuis `datan.fr/assets/imgs/posts/`.
-      - Le fil d'Ariane d'un article lie ses **quatre** maillons, l'article
-        compris — seule page du site sans maillon actif ; c'est le comportement
-        de l'origine, reproduit via `actif: false`.
-- [x] `/parrainages-2022` (`Parrainages.php`) — **portée le 24 juillet.**
-      `ParrainageController` + `parrainages/index.html.twig`, entité `Parrainage`,
-      migration, `app:import:parrainages`. Les 13 427 parrainages 2022 récupérés
-      (0 écarté) ; la page n'en affiche nommément que le volet des **530 députés**,
-      le décompte « plus de 500 signatures » se faisant sur l'ensemble. Trois
-      colonnes viennent de la fiche du député (jointure `depute`), non de la table
-      `parrainages` : le lien est **obfusqué** (`url_obf`) vers `depute_individual`
-      et **conditionné à l'existence d'une fiche** (`dpt_slug`+`slug`) pour ne
-      jamais fabriquer un 404 — les 530 en ont une, la garde tient pour les autres ;
-      le **groupe** par le rattachement le plus récent (`fonction_groupe`), non par
-      `depute.groupe_id` qui laisserait 377 anciens députés sans groupe là où
-      datan.fr montre leur dernier connu ; le **département** en casse canonique
-      (« Haute-Corse (2B) »), même correction assumée que les pages d'élections.
-      **Le nom, lui, reste celui de la source** (`parrainages.nom/prenom`) : accents
-      parfois absents (« Eric »), instantané de 2022 (« Nicole Gries-trisse ») —
-      c'est ce qu'affiche datan.fr, jusqu'à lier ce nom-là à la fiche au nom actuel.
-      Table `datatable-datan.min` et graphique `chart.min` repris du legacy. Cache
-      1 h, `og:image` générique. Fil d'Ariane en §2.
-- [x] `/questionnaire` (`Quiz.php`) — **portée.** `QuizController` +
-      `quiz/index.html.twig`. **Ne consomme PAS `question_quiz`** (récupérée par
-      `app:import:quiz`) : cette table n'alimente que
-      `Quizz_model::get_questions_api()`, branchée sur aucune route de
-      `routes.php` — un service pour une application tierce, sans page. Ce que
-      `/questionnaire` affiche, comme le legacy, ce sont les **trois derniers
-      votes décryptés** (`get_most_famous_votes(3)`), proposés en « pour / contre
-      / abstention » pondéré. Notre page rend le PLFSS 2026 (les trois plus récents
-      décryptages, confirmés identiques dans la base de production) ; datan.fr en
-      montre trois plus anciens, sa page étant en cache HTTP. Coquille corrigée :
-      le `<title>` du legacy dit « Blog | Datan » (copier-coller du blog), rétabli
-      en « Quel député choisir ? ». Le calcul de proximité (`Quiz::result()`) est
-      resté inachevé côté legacy (vue rechargée sans votes, affichage du score
-      commenté) : `/questionnaire/resultat` redonne le questionnaire au lieu de
-      rendre une page morte. Cache 1 h.
-- [x] `/outils/coalition-simulateur` — **portée le 24 juillet.**
-      `OutilsController` + `outils/coalition.html.twig`. `coalition_builder.js`
-      (intouché) lit un global `groups` posé en ligne, indexé par sigle, chaque
-      entrée portant `seats` et `color` ; on lui sert exactement cette forme.
-      **Effectifs comptés sur `fonction_groupe.nomin_principale`, jamais sur
-      `depute.groupe_id`** — 577 sièges principaux ouverts, l'hémicycle SVG en a
-      autant de cercles. Couleurs via `CouleurGroupe`, ordre par effectif décroissant,
-      NI compris. Les douze sigles et leurs couleurs collent au vivant ; deux
-      effectifs diffèrent — **EPR 91 / HOR 35 chez nous, 90 / 36 sur datan.fr**. Ce
-      n'est pas un défaut : notre chiffre est celui de la table `groupes_effectif`
-      de la base de production (91 / 35) et de la méthode prescrite ; le site sert
-      un instantané plus ancien. FAQ structurée (`FAQPage`) reproduite. Pas de fil
-      d'Ariane (le contrôleur d'origine n'en rend pas), `og:image` générique,
-      cache 1 h. Encart de dons inclus (`partials/campagne.html.twig`, masqué tant
-      qu'aucune campagne n'est active). `App\BlocPolitique` n'est pas utilisé : le
-      simulateur liste des groupes réels, pas une lecture en blocs.
-- [x] `/recherche/{q}` et `/search_api` — **portés.** `SearchController` (+ macro
-      `search/_icones.html.twig`). Six familles dans l'ordre de l'UNION d'origine
-      (députés, groupes, villes, départements, votes décryptés, articles), rendues
-      en six requêtes distinctes plutôt qu'une UNION : même résultat, et le tri par
-      famille (villes par longueur puis population, départements par nom) reste
-      honoré, ce qu'un `ORDER BY` de membre d'UNION n'est sous MariaDB qu'avec un
-      `LIMIT`. `/search_api` rend le JSON `{text, url, source}` **à l'octet près**
-      de datan.fr (vérifié sur `lyon&type=ville` : `\/`, `ê`, chevrons bruts) —
-      ce qui fait marcher l'autocomplétion (`dist/autocomplete_search.js`) sans
-      toucher au JS. Pas de normalisation PHP des accents : la collation retrouve
-      « Rhône » depuis « rhone », et `highlight_phrase` reste littéral (accents non
-      repliés, sans drapeau `u`), comme le legacy — l'accent se voit donc dans la
-      recherche mais pas dans le gras, parité exacte. Trois défauts corrigés : le
-      brouillon d'un vote décrypté n'est plus exposé (le legacy ne filtrait pas
-      l'état) ; l'adresse d'un vote du Congrès prend la forme `vote_cN`, sinon lien
-      cassé ; l'article pointe sa vraie rubrique et non le « rapports » codé en dur
-      (notre route valide la rubrique). Le `MATCH` plein texte, sans index
-      FULLTEXT chez nous, devient un `LIKE`, trié par récence. Page noindex, cache
-      1 h ; API non mise en cache partagé, comme le legacy. **À câbler côté
-      `base.html.twig` / accueil (chantier de Rémi)** : la barre de recherche
-      (`id="search"` + `search-bloc` / `-results-bloc` / `-results-list` /
-      `more-results-link`, markup dans `home/index.php` du legacy) et le chargement
-      de `autocomplete_search.js` ne sont pas encore dans les gabarits ; le champ
-      `citySearch` des pages d'élections existe déjà et fonctionne désormais.
-- [x] `/iframe` et `/iframe/depute/{slug}` — **portés.** `IframeController` +
-      `iframe/depute.html.twig` (document autonome, sans `base.html.twig`) +
-      `iframe/index.html.twig`. **Embarquable** : aucun `X-Frame-Options` ni CSP
-      `frame-ancestors` (l'application n'en pose aucun, le contrôleur non plus —
-      vérifié `curl -I`), cache public 3 jours comme le legacy
-      (`output->cache("4320")`). Reprend la parade de slug non unique de
-      `DeputeController` (jamais modifié ici) : `ORDER BY (dpt_slug IS NULL), id`,
-      `dpt_slug NULL → 404`. Paramètres `?categories=`, `?first-person=true`,
-      `?main-title=hide`, `?secondary-title=hide` honorés. Contenu : les blocs de
-      la fiche tels que ce portage les rend (positions importantes, derniers votes,
-      élection, participation/loyauté), la participation locale du bloc élection
-      masquée en contexte iframe comme le legacy. Ni pistage (Matomo, GTM) ni
-      bannière de consentement (tarteaucitron) — les injecter chez un tiers serait
-      un défaut, corrigé. **Écart assumé** : datan.fr sert dans l'iframe la version
-      riche de la fiche (carrousels de votes, graphiques du comportement politique)
-      que notre fiche `/deputes` n'a pas encore ; l'iframe est donc au niveau de la
-      fiche, pas à celui du legacy. Blocs `explication` et `questions` non portés
-      (le second est déjà désactivé côté legacy).
-- [x] `/votes/legislature-{n}/vote_{n}/explication_{mpId}` — **porté le
-      22 juillet**, dans ses deux formes, `vote_{n}` et `vote_c{n}`. C'est le
-      lien que le tableau de bord donne à partager : la page du scrutin, l'auteur
-      mis en avant. Le segment est le `mp_id` (`PA841451`), pas le slug. Une
-      explication retirée ou repassée en brouillon renvoie en 302 vers la page
-      ordinaire, comme le legacy — l'adresse a pu être partagée, le scrutin, lui,
-      existe toujours.
-- [x] **`/classements` redirige vers `/statistiques`** — **fait le 23 juillet**
-      (`ClassementController::ancienneAdresse()`). En **301**, quand datan.fr
-      répond 307 (le `redirect()` de CodeIgniter sans code) : un déplacement
-      définitif d'adresse indexée se dit en 301, défaut corrigé. Quant à
-      `/redirect/cities/{code}/{dpt}` : **vérifié le 23 juillet, il répond 404
-      sur datan.fr même** (deux codes INSEE valides essayés) — l'adresse est
-      morte à la source, il n'y a rien à porter.
-
-Abandonné sciemment, ne pas y revenir :
-
-- **Le maire d'une commune.** `cities_mayors` est vide dans la copie dont nous
-  disposons, et ce que la production affiche a dérivé (« Le maire de Amiens est
-  Hubert De jenlis »). Une donnée fausse ne vaut pas mieux qu'une absente.
-
-## 4. Espaces authentifiés
-
-Rien n'est porté au-delà de `/connexion` et de `/admin/decryptages`.
-
-- [x] **Back-office — campagnes, FAQ, questionnaire, parrainages, tableaux
-      d'analyse** (`Admin.php`, `routes.php:53-88`). Portés le 24 juillet, sous
-      la coque `admin/base.html.twig` (menu de rédaction ajouté), formulaires
-      Symfony + CSRF, aucune entité exposée en `#[ApiResource]`, pas de cache
-      HTTP. Règles de rôle reprises du legacy : tout rédacteur crée, reprend un
-      brouillon et publie ; **seul l'administrateur reprend un contenu publié**
-      (FAQ, questionnaire — `modify_*` renvoie à la liste si `state==published &&
-      usernameType!=admin`) **et supprime** (`delete_*`, `delete_campaign`).
-      Vérifié aux deux comptes : anonyme 302, rédacteur 200 partout / 302 sur une
-      modif publiée / 403 sur une suppression, administrateur 200. Le CRUD des
-      campagnes rend l'encart de dons pilotable (activation → `/campaign/current_active_campaigns`).
-  - **Écarts assumés, à faire quand la donnée existera :**
-    - *Postes Assemblée* (mandats en organe / commissions) : notre schéma ne
-      porte pas de mandats secondaires ni de table `organe` — l'écran l'affiche
-      franchement au lieu d'un tableau vide.
-    - *Comptes X des députés* : les réseaux sociaux sont une donnée que Datan
-      tient à la main, pas encore importée (cf. plus haut) — même traitement.
-  - **Laissé de côté sciemment :** `admin/votes` (c'est le CRUD des décryptages,
-    déjà sous `/admin/decryptages`) ; `admin/api-keys` — **tranché le 24 juillet :
-    caduc.** Le seul client de l'API à clés du legacy était PoliticAnalysis, le
-    service externe qui générait les décryptages IA et les résumés d'amendements ;
-    cette génération est désormais interne (cf. le brouillon par IA ci-dessous),
-    il n'y a plus de client à authentifier ; `admin/elections/*` (fenêtre de
-    candidatures close depuis 2022).
-- [x] **Relecture des amendements et CRUD du blog** (`Admin::amendements`,
-      contrôleur `Posts`) — **portés le 24 juillet.**
-  - **`/admin/amendements`** (`AmendementController`) : la file des votes sur
-    amendement de la législature en cours **non encore décryptés**, où la
-    rédaction relit le titre et le résumé IA puis coche « relu ». Filtres
-    période / dates / « masquer les relus » repris du legacy ; disparité et
-    intérêt **calculés en SQL** à l'identique (`daily.php`). La case « relu »
-    bascule `amendement.resume_relu` par un **POST + jeton CSRF** (l'AJAX du
-    legacy `admin/amendements/review`), écriture par l'ORM. Le bouton
-    « Décrypter », qui ouvrait le service externe PoliticAnalysis
-    (`{PA_URL}/scrutins/{uid}/decryptage`), pointe désormais l'écran interne
-    `/admin/decryptages/nouveau?legislature=&numero=`. Accès rédacteur **et**
-    administrateur (le `security_only_team` du legacy), sans garde plus fine.
-    - **Écart de schéma assumé :** le socle IA du legacy vivait dans une table
-      `amendements_ia` clée sur le vote (`legislature`, `voteNumero`) ; chez nous
-      résumé et drapeau vivent sur l'amendement (`resume_ia`, `titre_ia`,
-      `resume_relu`), qu'un scrutin désigne par `amendement_id`.
-    - **Note de simplicité (`simplicite_ia`) absente de notre schéma** : la
-      colonne « Simplicité » est affichée **vide (« — »), pas inventée** — à
-      ajouter le jour où la génération IA la produit (le legacy la rend en étoiles
-      1–5).
-  - **`/admin/blog`** (`Admin\BlogController`, distinct du `BlogController`
-    public) : liste (brouillons compris), création, modification, suppression.
-    Corps en HTML éditorial (CKEditor `#editor`, rendu `|raw`, comme la FAQ).
-    Règles de rôle **alignées sur les décryptages** : création en brouillon,
-    reprise d'un contenu publié et suppression réservées à l'administrateur — plus
-    strict que le legacy (qui laissait un rédacteur rouvrir un publié sans pouvoir
-    en changer l'état, ce qui le remettait à NULL, un défaut), mais uniforme avec
-    le reste du back-office.
-  - **`admin/exposes` : analysé, non porté (remplacé de fait).** L'écran du legacy
-    n'éditait qu'une colonne, `exposes.exposeSummaryPublished` — la version relue
-    de l'exposé des motifs, à côté de l'original (`exposeOriginal`) et d'un résumé
-    OpenAI (`exposeSummary`). Or dès la 17e législature le legacy ne lit plus cette
-    table : il **reconstruit** le texte depuis `amendements_ia`
-    (`resume_ia` + `justification_ia`). Chez nous il n'y a pas de table `exposes`,
-    et le résumé éditorial d'un amendement vit sur `amendement.resume_ia`, relu via
-    l'écran des amendements ci-dessus — l'exposé publié y est donc déjà couvert.
-    Rien à porter tant qu'on ne réintroduit pas la distinction original / résumé
-    OpenAI / version publiée (et `justification_ia` n'existe pas encore chez nous).
-- [x] **Brouillon de décryptage par IA** (`/admin/decryptages`) — **livré le
-      24 juillet.** Refait en interne à partir de PoliticAnalysis et d'alinea
-      (dépôts de référence clonés dans `../PoliticAnalysis` et `../alinea`),
-      pour ne plus dépendre d'un service externe. L'essentiel : le brouillon
-      s'appuie sur **les morceaux de discours tenus en séance** autour du vote.
-      - Corpus des débats : dépôt Tricoteuses `Comptes_Rendus_Seances_XVII_nettoye`
-        (`comptes-rendus` au Catalogue), importé par `app:import:comptes-rendus`
-        (601 séances, 30 905 sections, 263 808 paroles ; 10e étape du sync
-        quotidien). Tables `compte_rendu`, `cr_section`, `cr_parole` ; liens de
-        hiérarchie par `ordre_absolu_seance`, pas par id (insertion par lots).
-        Le lien vote → débat passe par `scrutin.seance_ref` (8 434/8 434 en
-        L17, 18 séances sans CR : publication différée de quelques jours).
-      - Services `App\Ia` : `CollecteurDecryptage` (ancrage de la discussion par
-        la parole « Voici le résultat du scrutin » matchée sur les chiffres,
-        section sœur précédente incluse — la discussion générale des séances
-        antérieures est un choix de périmètre non couvert) ; `GenerateurBrouillon`
-        (deux moteurs par `IA_MODELE` : `claude-*` → API Anthropic, SDK officiel,
-        sinon Ollama local `OLLAMA_URL` ; sortie contrainte par schéma JSON) ;
-        `ValidateurCitations` (chaque citation « … » vérifiée contre le compte
-        rendu : exacte / bigramme / recouvrement 60 %).
-      - Bouton « Générer un brouillon » dans le formulaire (visible seulement si
-        `IA_MODELE` est posé) : pré-remplit titre et CKEditor, affiche le rapport
-        de citations. **Jamais de publication automatique** — le décryptage est
-        la seule donnée que Datan produit, l'IA propose, la rédaction dispose.
-      - Vérifié bout en bout le 24 juillet (gemma4 local, scrutin 8372) :
-        endpoint 200 en ~20 s, 403 sans jeton, 302 anonyme, bouton absent sans
-        modèle ; 7 citations sur 8 retrouvées mot pour mot, la 8e signalée à la
-        relecture — c'est le rôle du validateur.
-      - **Résumés d'amendements branchés le 24 juillet** sur le même moteur
-        (`App\Ia\MoteurIa`, extrait pour être partagé) : commande
-        `app:ia:resumes-amendements` (titre_ia, resume_ia, simplicite_ia —
-        colonne ajoutée, migration `Version20260724180000`). Ne touche jamais
-        un résumé existant, `resume_relu` reste à la rédaction, **hors du sync
-        quotidien** : chaque exécution appelle un modèle, on la lance sciemment.
-        L'ancienne boucle PoliticAnalysis (`/api/amendements_ia`) n'a plus lieu
-        d'être. `/admin/decryptages/nouveau?legislature=&numero=` pré-remplit le
-        formulaire — la cible du bouton « Décrypter » de l'écran amendements.
-        Vérifié en réel (gemma4, 2 résumés générés, relu=0). Piège consigné
-        dans `MoteurIa` : les modèles Ollama à réflexion consomment leur budget
-        `num_predict` en raisonnement AVANT la réponse — sans marge, contenu
-        vide (`done_reason: length`).
-      - **Reste :** choisir le modèle de production (`IA_MODELE` dans
-        `.env.local` : `gemma4:latest` testé, `claude-haiku-4-5` dès qu'une
-        `ANTHROPIC_API_KEY` est posée).
-- [x] **Espace député** (`/dashboard`) — **porté le 22 juillet.** Un député
-      connecté y rédige, publie, reprend et supprime ses explications de vote,
-      aux adresses du legacy (`explications/create/l{n}v{n}` et ses jumelles).
-      Un compte devient celui d'un député par son rattachement à une ligne
-      `depute` (`app:utilisateur:creer --depute=<slug>`), et c'est ce lien seul
-      qui porte `ROLE_DEPUTE` : rédaction et députés sont exclusifs, vérifié
-      dans les deux sens.
-      - [x] **`dashboard/elections/{slug}` et `/modifier`** — **portées le
-        24 juillet** (`DashboardController`, gabarits `dashboard/elections/**`).
-        La fiche de candidature (`DashboardMP::elections`) se lit dans `election`
-        + `candidature`, déjà en base ; elle n'ouvre que pour les législatives
-        2022 (`ELECTIONS_FICHE = [4]`, comme le `in_array($id, array(4))` du
-        legacy). La **garde de fenêtre** est reproduite : `/modifier` renvoie 404
-        dès qu'on est à deux jours ou plus du premier tour (`elections_modify →
-        show_404()`) — close depuis des années pour 2022, la fiche se visite, la
-        candidature ne se modifie plus. Le district (code de département) est
-        traduit en nom comme `get_district`, la Corse « 2a » retrouvée par la
-        collation. Coquille corrigée : « vendredi précédant » (participe) et non
-        « précédent ». Ajout : une entrée **« Ma candidature »** dans la barre
-        latérale du dashboard, le legacy ne menant à cette page par aucun lien
-        (URL orpheline — ni sidebar, ni carte d'accueil).
-      Reste de côté, sciemment : **le générateur d'iframe**, que le legacy ouvre
-      sur un `show_404()` (« Temporary disallow iframe for MPs ») — il n'y a rien
-      à imiter.
-      Le tableau de bord reprend depuis le 23 juillet la **barre latérale
-      sombre** du legacy (AdminLTE `sidebar-mini`, photo du député en médaillon,
-      menu propre au rôle), et non plus la barre supérieure simplifiée. La coque
-      `admin/base.html.twig` est partagée avec la rédaction, comme le
-      `dashboard/header.php` d'origine qui bascule sur `$type`.
-- [x] **Comptes députés : `/demande-compte-depute`** — **porté le 24 juillet.**
-      `DemandeCompteController` (formulaire public, jeton CSRF, aucun cache HTTP)
-      + `Admin\DemandeCompteController` (écran de traitement, `ROLE_ADMIN`) +
-      entité `DemandeCompteDepute`. Le legacy (`Users::demande_mp`) vérifie que
-      l'adresse est celle d'un député (`deputes_contacts.mailAn`, ici
-      `depute.mail_an`, 2 057 renseignées) et qu'aucun compte n'y est rattaché,
-      crée un jeton de 24 h et **envoie un courriel d'activation** — la
-      possession de l'adresse `@assemblee-nationale.fr` valant preuve, et
-      `/register/{token}` laissant le député créer lui-même son compte. Ce
-      portage **n'envoie pas de courriel** (Mailjet, comme la newsletter, relève
-      du déploiement) et `/register` appartient aux comptes lecteurs : la demande
-      devient une **ligne en attente** qu'un administrateur relit et approuve —
-      c'est lui qui transmet les identifiants à l'adresse institutionnelle, le
-      contrôle par l'adresse s'y reporte plutôt que de se perdre. **Depuis le
-      portage des comptes lecteurs (24 juillet), l'approbation n'ouvre plus le
-      compte directement** : elle émet le jeton d'activation — l'ancien
-      `users_mp_link`, désormais porté par `demande_compte_depute.token` — et le
-      lien `/register/{token}` par lequel le député crée lui-même son compte et
-      choisit son mot de passe (le self-service du legacy restitué, mais en aval
-      de la relecture ; plus de mot de passe provisoire à transmettre). Le lien
-      part à l'adresse institutionnelle (MAILER_DSN, `null://` en local) et
-      s'affiche à l'administrateur pour transmission manuelle. **Anti-abus** : le
-      captcha du legacy n'est pas porté (pile anti-spam de déploiement) ; le
-      contrôle de l'adresse, un verrou « une demande par député » et la relecture
-      humaine le remplacent. **Prouvé en prod** (serveur unique) : adresse
-      inconnue → refus, format invalide → refus, député avec compte → « déjà un
-      compte », député sans compte → demande créée, seconde saisie → verrou,
-      approbation → jeton émis, `/register/{token}` → compte `ROLE_DEPUTE` qui se
-      connecte et atterrit sur `/dashboard`, jeton à usage unique annulé après
-      création. L'entrée de menu vers `/admin/demandes-comptes` (un `<li>`
-      gardé `ROLE_ADMIN` dans la coque `admin/base.html.twig`) a été posée à
-      l'intégration, le 24 juillet — la coque était alors sous la main d'un
-      autre agent, d'où le passage de relais.
-- [x] **Récupération des comptes du legacy** — commande `app:import:utilisateurs`
-      (23 juillet). **Le mot de passe de l'ancienne base fonctionne sur la
-      nouvelle** : le legacy hache en `password_hash(PASSWORD_DEFAULT)`, du bcrypt
-      (`$2y$`) repris tel quel, que le vérifieur `auto` de Symfony relit et
-      ré-encode au passage (`PasswordUpgraderInterface`). **Prouvé de bout en
-      bout** : un hash bcrypt d'un mot de passe connu ouvre la session, un
-      mauvais échoue, le hash passe de `$2y$12$` à `$2y$13$` après connexion.
-      `users.type` → rôle : `admin` → `ROLE_ADMIN`, `writer` → rédacteur, `mp` →
-      rattaché au député via `users_mp.mpId` = `depute.mp_id`. Les **lecteurs
-      publics (`type=''`) sont écartés** — sans député ni rôle, `getRoles()` les
-      ferait rédacteurs. Connexion par identifiant **ou** e-mail
-      (`loadUserByIdentifier`) ; e-mail non unique → on refuse plutôt que de
-      trancher au hasard. **Attention** : le backup public de datan.fr est réduit
-      à **un seul compte** (`remikel`, admin) et `users_mp` y est vide — la
-      commande est vérifiée sur ce peu, à rejouer contre la vraie base des
-      comptes le jour du déploiement.
-- [x] **Page de connexion** — remise en parité le 23 juillet : deux colonnes,
-      logo Datan, fond Palais Bourbon (`main.css`), au lieu de la carte AdminLTE
-      générique. **Servie désormais à `/login`** (l'adresse qu'attendent les liens
-      du site ; `/connexion`, l'adresse du portage, y redirige en 301) depuis le
-      chantier des comptes lecteurs — un seul formulaire connecte lecteurs,
-      rédaction et députés. Les liens « S'inscrire », « Mot de passe oublié » et
-      « Demandez un compte député » sont rétablis, ces pages existant désormais.
-      Connexion par identifiant **ou** e-mail, comme le legacy. Le fond du Palais
-      Bourbon est un lien externe vers Wikimedia, hérité du legacy — dépendance à
-      héberger un jour en propre.
-- [x] **Comptes lecteurs** — **portés le 24 juillet.** `/login` (l'adresse du
-      site, `/connexion` y redirige en 301), `/register` (+ `/register/{token}`),
-      `/password` (+ `/password/{token}`), `/mon-compte` (+ données, mot de passe,
-      suppression). **Le piège des rôles** : un lecteur n'a ni député ni rôle, et
-      `getRoles()` retombait alors sur `ROLE_REDACTEUR` — il aurait ouvert la
-      rédaction. Correction : un lecteur porte `ROLE_LECTEUR` **explicitement**,
-      et `getRoles()` en fait la garde (l'exclusion est écrite, pas confiée aux
-      données, comme pour le député). **Prouvé en prod** (serveur unique) : un
-      lecteur connecté n'obtient jamais 200 sur `/admin/*` ni `/dashboard` (403),
-      seulement sur `/mon-compte`, et atterrit sur l'accueil ; un rédacteur à
-      `roles=[]` garde bien `ROLE_REDACTEUR` (le repli est intact). Chaque flux
-      vérifié : inscription (six saisies invalides refusées en 422), connexion des
-      trois familles à leur page d'arrivée, réinitialisation (jeton 1 h, usage
-      unique, envoi MAILER_DSN `null://`), changement et suppression de compte.
-      **Écarts corrigés et commentés** : l'énumération de comptes sur `/password`
-      (message neutre, qu'un compte existe ou non) ; la suppression par simple
-      lien GET (POST + CSRF) ; le jeton de réinitialisation réutilisable (usage
-      unique) ; un plancher de mot de passe (8 caractères, le legacy n'en avait
-      aucun pour les lecteurs). `/register/{token}` (activation d'un député) est
-      branché sur `demande_compte_depute` (cf. bullet ci-dessus). **Laissé au
-      déploiement** : le captcha et la pénalité anti-force-brute (pile anti-spam),
-      le transport Mailjet réel. Le lien « Connexion » du pied de page de
-      `base.html.twig` a été **câblé à l'intégration le 24 juillet** (clair sur
-      l'accueil, obfusqué ailleurs, comme ses voisins) ; « Mon compte » est
-      entré au menu de la rédaction (`admin/base.html.twig`) au même moment.
-- [x] **Inscription à la newsletter** — **portée le 24 juillet** : page
-      `/newsletter`, endpoint `POST /api/newsletter/create_newsletter` (adresse
-      que `main.min.js` porte en dur — exception déclarée dans
-      `access_control`, seul POST public sous `/api`), modale `#newsletter`
-      dans `base.html.twig` et bouton de l'accueil rétabli. **L'inscription est
-      cassée sur datan.fr depuis le 24 mars 2026** : `Legacy_api.php` a été
-      supprimé du legacy en laissant sa route et les deux formulaires qui
-      postent dessus — tout envoi tombe en 404 et l'internaute reçoit « Vous
-      êtes sans doute déjà inscrit ! » (vérifié en vivant : l'API répond 404
-      sur un endpoint de lecture). Défaut corrigé au portage, commenté dans
-      `NewsletterController`. Les appels Mailjet du legacy (courriel de
-      bienvenue, listes de contacts) ne sont pas portés : configuration de
-      déploiement. **Restent** : `/newsletter/edit/{email}` et `/delete`,
-      dépendants de Mailjet, et l'envoi mensuel (`newsletter/votes`, CLI).
-
-### Récupération des données non regénérables
-
-Tout ce que la production détient et que l'open data ne republie pas est à
-préserver. La base de production vit dans le conteneur `datan-db` ; chaque
-commande porte sa requête d'export en docblock. **Un import de récupération
-réaligne sur la production : une fois l'application devenue la source (un député
-qui écrit, un rédacteur qui publie), ne pas le rejouer sans y penser, il
-écraserait les écritures locales.**
-
-- [x] **Comptes** (`app:import:utilisateurs`) et **explications de vote**
-      (`app:import:explications`) — voir ci-dessus et §3. Les explications sont
-      remontées à **45** (contre 40) : l'import initial ratait les **5 du vote du
-      Congrès** (inscription de l'IVG, L16) faute de résoudre le numéro
-      sentinelle `-1` ; la commande passe par le décryptage, qui porte le bon
-      `scrutin_id`.
-- [x] **Blog** (`app:import:articles`) — 3 rubriques + **18 articles** récupérés
-      dans les tables `article` / `categorie_article` (entités dédiées, HTML
-      déséchappé). L'auteur ressort vide sur le backup public (ses rédacteurs
-      n'y sont pas), il se résoudra sur la vraie base. **Les pages publiques
-      sont portées depuis le 23 juillet** (voir §3), images de production
-      comprises.
-- [x] **FAQ** (`app:import:faq`) — **6 catégories et 11 questions** récupérées,
-      10 publiées, dans `faq_categorie` / `faq_post`. Le corps HTML est déséchappé
-      comme le blog. L'auteur n'est pas repris : la page ne l'affiche pas et
-      `created_by = 18` ne résout rien dans le backup réduit. Voir §3 pour la page.
-- [x] **Quiz** (`app:import:quiz`) — **30 lignes lues, 1 écartée** (le brouillon de
-      test id 34, `quizz = 0`), **29 questions récupérées**, 20 publiées, dans
-      `question_quiz`. Le scrutin visé est gardé en `(scrutin_numero, legislature)`
-      pour un rapprochement ultérieur, la catégorie par son slug (`fields`). Texte
-      brut, aucun déséchappement. `sujets` et `profession_foi` restent vides dans ce
-      backup. La page `/questionnaire` reste à porter (§3).
-- [x] **Parrainages 2022** — `parrainages` (13 427) récupérés le 24 juillet
-      (`app:import:parrainages`, entité `Parrainage`), 0 écarté. **Regénérable
-      depuis l'open data du Conseil constitutionnel** — noté au docblock — mais
-      repris de la production, qui les tient nettoyés et adossés aux acteurs
-      (`mpId`). Sert la page `/parrainages-2022` (§3). Import de récupération, hors
-      `app:sync:quotidien`.
-- [ ] **Campagnes de dons** (`campaigns`) et **newsletter** (`newsletter`) :
-      **vides** dans ce backup — rien à récupérer ici, à revérifier sur la vraie
-      base. Les tables cibles existent depuis le 24 juillet (`campagne`,
-      `newsletter`, colonnes du legacy sous des noms français) : au déploiement,
-      transvaser les abonnés réels avant l'ouverture.
-- **Note** : `questions` (17 328 lignes) n'est pas le quiz mais très
-  probablement les questions au gouvernement — de l'open data, regénérable ;
-  à confirmer avant d'en faire un chantier de récupération.
-
-## 5. Ornements du gabarit
-
-- [x] **Plus aucun lien mort dans `base.html.twig`** — « Connexion » (pied de
-      page), le dernier, a été câblé le 24 juillet à la livraison des comptes
-      lecteurs : `path('connexion')` (soit `/login`), en clair sur l'accueil et
-      obfusqué ailleurs comme ses voisins (vérifié : `sdfghj/ybtva` = `/login`
-      en ROT13). Tous
-      les autres sont câblés depuis le
-      24 juillet : « S'inscrire à la newsletter » (nav, avec son icône),
-      « Élections » (nav), « Newsletter » (pied de page), puis « Simulateur
-      coalition » (nav), « Simulateur Assemblée » et « Parrainages 2022 » (pied
-      de page) sitôt les pages livrées par l'agent élections. La **barre de
-      recherche de l'accueil** (carte avec le mot qui défile) a été portée au
-      passage, l'endpoint `/search_api` existant enfin : balisage de
-      `home/index.php`, `dist/typed.js` + `dist/autocomplete_search.js` chargés
-      sur l'accueil seul comme l'origine (`Home.php:134`), exemple aléatoire
-      (député ou groupe) figé une heure par le cache, action du formulaire
-      neutralisée (le legacy vise `recherche.php`, une adresse morte — le JS
-      intercepte toujours). Le `href="#"` de `<link rel="shortcut icon">` est
-      volontaire — il évite une seconde requête de favicon, et le legacy
-      l'écrit à l'identique.
-- [x] **Bloc de dons** (`partials/campaign.php`) — **porté le 24 juillet** :
-      `partials/campagne.html.twig` + `GET /campaign/current_active_campaigns`
-      (`CampagneController`, clés JSON du legacy car `campaigns.js` — l'actif du
-      site repris tel quel — lit `campaigns[0].text` et porte l'adresse en dur).
-      Inclus aux **17** emplacements du legacy portés à ce jour : les dix pages
-      de classements, la fiche de ville, la fiche député, la fiche groupe, la
-      liste des partis et les trois pages de votes.
-      L'encart reste invisible (`d-none`) tant que la table `campagne` est vide
-      — c'est le comportement du site. Les deux derniers emplacements sont
-      couverts depuis le 24 juillet : `outils/coalition` (posé par l'agent
-      élections avec la page) et `election/resultats_commune` (posé après sa
-      livraison). Les **19** emplacements du legacy sont donc tous servis.
-- [x] **Modale d'inscription à la newsletter** — **portée le 24 juillet** dans
-      `base.html.twig` (formulaire `#newsletterForm` intercepté par
-      `main.min.js`, états masqués par `main.css`), avec le bouton de l'accueil
-      qui l'ouvre, rétabli au passage.
-- **La modale de première visite n'est pas à porter** : le hook
-  `generalModal.php` du legacy force `show_popup = false` (« Comment if you do
-  not want to desactivate ») et son contenu est un éditorial daté (motion de
-  confiance de septembre 2025). C'est un mécanisme d'annonce ponctuel,
-  aujourd'hui éteint à la source — le rétablir serait un choix éditorial, pas
-  un portage.
-- [x] **Modale de dons et pile de suivi** — **portées le 25 juillet**, le
-      classement « au déploiement » était une erreur d'inventaire : datan.fr
-      sert tout cela sur chaque page. Dans `base.html.twig` :
-      - **tarteaucitron** (même version épinglée du CDN, `footer.php:230-345`),
-        toujours servi ; il pilote GTM et le service maison « datantracking »
-        (compteur mensuel de pages en cookie → `partials/modale_don.html.twig`
-        au seuil de 10 pages, au plus une fois par semaine). Correction : le
-        « readmoreLink » de l'origine pointe `/cookiespolicy`, une adresse qui
-        n'a **jamais existé** (404 depuis toujours) → mentions légales.
-      - **Matomo** (hors consentement, config exemptée CNIL, traceur renommé
-        `1337.js` anti-bloqueurs) derrière `MATOMO_URL`, **GTM** derrière
-        `GTM_ID` — vides par défaut : un poste de développement ne pollue
-        jamais les statistiques ; en production `MATOMO_URL=https://matomo.datan.fr`
-        (serveur vérifié vivant) et `GTM_ID=GTM-K3QQNK2`. Vestiges NON repris,
-        commentés : l'`onload="embedTracker()"` (fonction introuvable partout —
-        ReferenceError silencieuse sur chaque page du vivant) et le compteur
-        `#monthly-pages-visited-count` (aucun élément HTML ne le porte nulle
-        part). Le pistage reste absent de l'iframe embarquée (choix consigné).
-      - Vérifié en prod : bannière + modale présentes, Matomo/GTM absents à
-        vide et présents une fois les variables posées.
-
-## 6. Points de vigilance sur l'existant
-
-- **L'API était ouverte en écriture à tout le monde** (corrigé le 22 juillet).
-  API Platform expose POST, PATCH et DELETE dès qu'une entité porte
-  `#[ApiResource]` sans liste d'opérations, et n'exige aucune authentification
-  par défaut : `/api` n'était pas dans `access_control`. Vérifié, pas supposé —
-  un `POST /api/explications` anonyme atteignait la base et n'échouait que sur
-  un `NOT NULL`. **Un anonyme pouvait donc supprimer un décryptage**, la seule
-  donnée du site qu'aucun import ne régénère. Les quatorze entités déclarent
-  désormais `operations: [new Get(), new GetCollection()]` ; deux règles
-  d'`access_control` rattrapent celle qui l'oublierait. À vérifier à chaque
-  nouvelle entité exposée : le défaut d'API Platform est ouvert, pas fermé.
-- **Le texte d'une explication n'est plus rendu en `|raw`.** Tant que la table
-  était en lecture seule, les 40 lignes héritées étaient du texte contrôlé ;
-  l'espace député en fait une saisie, donc une injection possible sur une page
-  publique. Aucune des 40 ne contient de balise, de saut de ligne ni
-  d'esperluette : l'échappement ne change rien à l'affichage. `nl2br` échappe
-  avant de convertir, et couvre le jour où quelqu'un ira à la ligne.
-
-- **`/commissions` a été conçue, pas portée.** `Commissions.php::index()` du
-  legacy ne rend qu'une page « en construction » de 2,6 Ko, sans en-tête ni pied
-  de page. Ne pas chercher à rendre notre page identique à datan.fr : il n'y a
-  rien à imiter.
-- **L'API** est servie par API Platform sous `/api`, et ne reprend pas le
-  découpage du legacy (`api/tables`, `api/votes`, `api/exposes`…). Si des tiers
-  consomment les anciennes adresses, il faudra des redirections.
-- **Saint-Barthélemy (97701) et Saint-Martin (97801) sont interchangeables dans
-  la source électorale**, qui les range indifféremment sous les départements 977
-  et 978 sans que rien ne permette de trancher. `app:import:resultats-electoraux`
-  émet un `[WARNING]` nommant les deux communes ; leurs chiffres sont à vérifier
-  avant d'être publiés. Deux communes sur 35 720.
-- **592 lignes de résultats écartées** parce que leur commune a fusionné depuis
-  le scrutin : elle existe au référentiel INSEE mais plus dans le découpage
-  électoral, donc plus dans `commune`. Rien à corriger, mais le chiffre mérite
-  d'être surveillé — s'il gonfle, c'est `app:import:communes` qui a régressé, pas
-  la source.
+- **La position majoritaire d'un groupe se RECALCULE, elle ne se reprend pas.**
+  Le champ `positionMajoritaire` publié par l'Assemblée ne départage que le
+  « pour » et le « contre » : un groupe à 4 pour / 1 contre / 17 abstentions y
+  est déclaré « pour ». Le site calcule depuis toujours la pluralité stricte sur
+  les trois positions (`daily.php:1439-1449`) — égalité ou personne d'exprimé →
+  `nv`. Avoir repris le champ publié avait faussé **6 983 ventilations** (dont
+  4 945 en 17e) et, par ricochet, toutes les loyautés, proximités et classements
+  du site (Bernalicis à 98 % au lieu de 100 %). La règle vit dans
+  `ImportScrutinsCommand::ligneVentilation` : ne pas la « simplifier ».
+  **Après toute reprise de `vote_groupe`, relancer
+  `app:calcul:statistiques-deputes` et `app:calcul:classements`**, qui en
+  dérivent.
+- **Le correctif SOC de la 16e vit dans `ImportScrutinsCommand`, comme celui de
+  la position majoritaire.** L'Assemblée publie une partie des ventilations du
+  groupe socialiste sous `PO800496` après son renommage en SOC-A (`PO830170`)
+  le 19/10/2023 : 581 ventilations réattribuées le 30 juillet (purge des
+  lignes fausses **avant** réimport de la 16e — l'upsert ne supprime jamais,
+  cf. la règle des imports). Vérifié contre le site : participation SOC 18 %,
+  SOC-A 19 %, cohésion 0,95, courbes SOC closes en octobre 2023, moyennes
+  d'assemblée 21 % / 0,94 identiques. Rejeu :
+  `app:import:scrutins --depot=var/tricoteuses/scrutins-xvi --tout --sans-votes`
+  (clone conservé sur place). Reste **8 ventilations SOC-A antérieures au
+  19/10** — l'anomalie inverse, que le correctif du legacy ne traite pas non
+  plus : parité.
+- **La base du conteneur `datan-db` est un instantané, comme le backup
+  public.** Son `daily.php` s'est arrêté au **13 mai 2026** (scrutin n° 6530) :
+  toute mesure qui y est prise date de ce jour-là, et conclure de cette copie
+  à l'état de datan.fr est une faute — commise puis rattrapée le 30 juillet :
+  la proximité EPR ↔ DEM y vaut 87 % quand le site vivant, à jour, affiche
+  88 %. La copie reste précieuse pour une chose que le site ne donne pas :
+  exécuter le vrai code du legacy sur des données connues. C'est ainsi que
+  notre formule de proximité est **prouvée identique** à la leur — sur la
+  fenêtre EPR ↔ UDR, close des deux côtés (3 041 scrutins), les deux calculs
+  donnent 0,4495 exactement.
+- **Les proximités de groupe de la 16e sont des chiffres d'époque, figés — ne
+  pas courir après.** `class_groups_proximite` est reconstruite chaque nuit en
+  `DROP + CREATE` depuis `groupes_accord`, qui ne porte que la législature
+  courante : depuis le passage à la 17e, le code du site **ne peut plus
+  produire** les proximités de la 16e — ses pages 16e servent, via le cache de
+  sortie CodeIgniter, des chiffres calculés à l'époque sur un état des données
+  d'alors. D'où les écarts restants, tous 16e : SOC ↔ ECOLO 68 % chez nous
+  contre 75 % figés, SOC-A ↔ ECOLO 75 % contre 78 %, moyenne de proximité à la
+  majorité 51 % contre 52 %. Nos valeurs sont le recalcul complet sur la
+  législature achevée, correctif SOC compris. Sur la 17e, vivante des deux
+  côtés, site et recalcul coïncident (EPR ↔ DEM 88 %, vérifié le 30 juillet).
+  Même famille que `coalitions_groupes` jamais vidée (ci-dessous) : l'histoire
+  de leurs tables n'est pas reproductible, et ce n'est pas un défaut de
+  portage.
+- **Un pourcentage se refait sur ses entiers, jamais sur `classement.score`.**
+  La colonne est un `decimal(8,3)` : les 45 femmes d'EPR sur 91 sièges y sont
+  stockées `0,495` et ressortent à 50 % au lieu de 49. Ce double arrondi
+  déplaçait d'un point 38 taux de loyauté et 32 de participation.
+  `ClassementController` refait donc le calcul sur `numerateur`/`denominateur`,
+  que la table garde en entiers — **et trie de même**, par produit croisé : sans
+  cela trois députés à 100 % partagent le rang 1 quand le site les sépare
+  (26/26, 2 783/2 783, 2 406/2 407). La même règle laisse en revanche la
+  participation ex æquo au rang 1, les 72 solennels étant communs à tous : c'est
+  bien ce qu'affiche le site.
+- **Le classement d'âge est le seul des neuf à ne pas passer par `RANK()`.**
+  `stats_model.php:29` y numérote au fil de l'eau : deux octogénaires du même
+  âge portent 1 puis 2, et le dernier porte 577. Ne pas « harmoniser » avec les
+  huit autres.
+- **`Stats::index()` n'applique pas le seuil que la page dédiée applique.** La
+  participation des groupes lue sur l'index des statistiques (RN 34 %,
+  LIOT 12 %) n'est donc pas celle de la page dédiée (75 %–95 %). Nous appliquions
+  le seuil aux deux ; les deux valeurs sont désormais reproduites telles quelles.
+  Parité assumée, aussi déroutante soit-elle.
+- **Un ex æquo sans départage change de gagnant d'un rendu à l'autre.** UDDPLR
+  et GDR comptent tous deux 9 cadres sur 17 sièges : sans second critère, la
+  carte en vis-à-vis désignait tantôt l'un, tantôt l'autre. Départage par sigle
+  — ce qui aligne au passage sur l'affichage du site. À vérifier partout où une
+  carte prend le premier d'un tri.
+- **La moyenne de cohésion du site ne correspond pas à ses propres lignes.**
+  `get_stats_avg()` moyenne `class_groups` sans reprendre le `active = 1` du
+  tableau affiché : 0,927 annoncé au-dessus de douze lignes qui donnent 0,925.
+  Même famille sur la participation des députés : le site moyenne toutes les
+  lignes, anciens députés compris, sous un tableau qui n'affiche que les 577 en
+  exercice — ses moyennes sortent un point sous les nôtres (89 % et 25 % contre
+  90 % et 26 %). Règle : **nous moyennons ce que nous montrons** — divergence
+  assumée, elle corrige. Les moyennes de groupes tombent juste des deux côtés.
+- **La période de présence d'un député se lit dans `fonction_groupe`, jamais
+  dans `mandat`.** L'Assemblée ne garde qu'un mandat par siège et **remplace**
+  l'ancien au lieu de l'archiver : Thierry Liger n'a qu'un mandat pris le
+  22/04/2026 et cinquante votes solennels dès février 2025 ; Patrick Hetzel un
+  mandat couvrant toute la législature alors qu'il était ministre d'octobre à
+  janvier. 26 députés de la 17e ont des votes hors de leur mandat déclaré — six
+  sortaient à plus de 100 % de participation. Le rattachement de groupe, lui,
+  se referme et se rouvre à chaque aller-retour : c'est sur lui que reposent,
+  depuis le 30 juillet, la participation (bornes de présence) comme la loyauté
+  (rattachement le plus récent, principal, votes bornés à ses dates —
+  68 des 645 votants de la 17e perdaient toute leur loyauté quand elle se
+  calculait sur `depute.groupe_id`, cf. le piège de `CLAUDE.md`).
+- **Participation aux solennels : le non-votant sort du dénominateur.**
+  Présider la séance ou siéger au Gouvernement interdit de voter — ce n'est pas
+  une absence (Braun-Pivet, non-votante sur 49 des 72 solennels, vaut 23/23 :
+  100 %, rang 16, comme le site). L'exception `PA721908` en dur de
+  `daily.php:2306-2318` n'est **pas** reprise : notre base reçoit ces scrutins
+  en `nonVotant` (72 lignes pour 72 solennels, aucun trou), le cas général
+  couvre le cas particulier et survivra au prochain président — consigné dans
+  le docblock de `CalculClassementsCommand`.
+- **L'égalité de rang d'un groupe se juge sur le score stocké, un
+  `decimal(6,3)`.** Le `RANK()` d'origine porte sur `class_groups.value` : deux
+  groupes séparés à la quatrième décimale sont ex æquo pour le site (UDDPLR et
+  GDR au rang 3, EPR et DEM au rang 6). Juger sur le flottant brut les
+  séparait. Les rangs stockés des députés portent désormais eux aussi des
+  ex æquo (1, 1, 1, 4…) — sans effet à l'affichage, le contrôleur recalculant
+  sur les entiers, mais visible en interrogeant la table.
+- **L'indice de Rose du site perd ses artisans, pas le nôtre — divergence
+  choisie.** `famsocpro` écrit « Artisans, commerçants et chefs d'entreprise »,
+  l'open data « Artisans, commerçants, chefs d'entreprises » : l'appariement à
+  égalité stricte du legacy fait disparaître les 41 artisans de la 17e du
+  calcul (ni numérateur ni dénominateur) quand son propre tableau croisé les
+  affiche. Retirer nos artisans reproduit le site au millième (LFI 0,432,
+  RN 0,403, sept groupes sur onze) : cause démontrée, docblock à l'appui. Des
+  députés bien classés valent mieux que la parité au chiffre — nos scores
+  restent un à quatre centièmes au-dessus, et c'est une ligne à changer si la
+  parité stricte est préférée un jour.
+- **Un non-votant s'affiche « abstention » dans les positions importantes, mais
+  la comparaison au groupe se fait sur la position brute.** Le comportement du
+  legacy est un accident heureux : `CASE WHEN vs.vote = 0` compare un varchar à
+  un entier, MariaDB convertit `'nv'` en 0 → « abstention », et le
+  `scoreLoyaute` reste NULL → « n'a pas voté comme son groupe ». Notre
+  `ComportementDepute` reproduit le résultat proprement : la normalisation ne
+  touche que l'affichage — la décider sur la position normalisée ferait passer
+  pour loyal un non-votant dont le groupe s'est abstenu.
+- **La moyenne de proximité à la majorité du site (46 %) sort d'une
+  auto-jointure sans garde** : le couple (RE, RE) vaut 1, la majorité pèse
+  ~100 % dans sa propre moyenne. Reproduit à contrecœur (le chiffre propre
+  serait 51 %), commenté dans le code — c'est une parité, pas une erreur à
+  « réparer ».
+- **La page statistiques d'un groupe recalcule à la volée ce que le site
+  précalcule la nuit** (sept tables `class_groups*` / `groupes_*_history` que
+  nous n'avons pas) : tout sort de `vote_groupe`, `fonction_groupe` et
+  `depute`, le cache HTTP tenant lieu de précalcul. Si cette page devient
+  lente à froid, c'est ici — et la réponse est un précalcul, pas un
+  appauvrissement de la page.
+- **`datetime-moment.js` se charge APRÈS `datatable-datan.min.js`, jamais avant.**
+  C'est un greffon de DataTables : il pose `$.fn.dataTable.moment`. Chargé avant
+  la bibliothèque il échoue en silence, puis l'initialisation de
+  `data-table-datan.js` meurt sur un `TypeError` — et **toutes** les tables de la
+  page perdent recherche, tri et pagination sans la moindre trace côté serveur.
+  `/votes/legislature-17` rendait ainsi ses 8 434 lignes d'un bloc, et les
+  **neuf pages de classement** perdaient recherche et tri d'un seul coup.
+  **Trois** gabarits avaient l'ordre inversé — `vote/all`, `parrainages/index`
+  et `classement/_layout` —, corrigés le 29 juillet ; `groupe/votes_tous`,
+  `depute/votes` et `vote/individual` étaient justes. Le symptôme ne ressemble
+  pas à une erreur de script : la page s'affiche, simplement sans ses commandes.
+  Le défaut ayant été trouvé trois fois indépendamment le même jour, le
+  vérifier reste le premier réflexe devant un tableau sans barre de recherche.
+- **La composition d'une législature achevée est incomplète dans notre source.**
+  La phrase « il y avait à l'Assemblée nationale N hommes et M femmes » compte,
+  comme le legacy, les mandats dont la prise de fonction est le **jour
+  d'ouverture** (`Legislature::ouverture()`) — et non les 618 à 651 personnes qui
+  ont siégé, qu'affichait notre première version. Mais notre source n'en porte
+  que 567 pour la 16e, 560 pour la 15e, 543 pour la 14e, là où datan.fr tombe
+  chaque fois sur les **577 sièges**. L'écart croît avec l'ancienneté : signature
+  d'un jeu de données de l'Assemblée qui remplace les mandats invalidés
+  (annulations, ministres jamais installés) au lieu de les conserver, quand le
+  legacy garde son instantané de l'époque. Les proportions, elles, tombent juste
+  aux 15e et 16e (61/39 et 63/37) et divergent de deux points à la 14e. Reprendre
+  les mandats depuis un instantané ancien serait le seul remède — pas un défaut
+  de portage.
+- **Un slug de département en casse mixte doit répondre, pas rendre 404.**
+  `/deputes/corse-du-sud-2A`, `/deputes/NORD-59`,
+  `/deputes/corse-du-sud-2A/ville_ajaccio` répondent 200 sur datan.fr — routeur
+  CodeIgniter permissif, collation MariaDB indifférente à la casse. Plutôt que
+  de servir la même page sous une infinité d'adresses, les motifs acceptent
+  désormais les majuscules et les quatre contrôleurs **redirigent en 301** vers
+  l'orthographe de `departement.slug`. Les exclusions `legislature-` et
+  `inactifs` ont dû être rendues insensibles à la casse, sans quoi elles volent
+  leurs routes à `DeputeListController`.
+- **Décoder les entités HTML APRÈS la troncature d'un extrait, jamais avant.**
+  `strip_tags()` ôte les balises mais laisse les `&nbsp;`, que l'échappement de
+  Twig rendait ensuite en toutes lettres. Le `word_limiter` du legacy compte
+  `&nbsp;Si` comme **un** mot, deux une fois décodé : décoder d'abord
+  déplacerait les frontières et changerait les 18 extraits du blog.
+- **Les trois méta-descriptions sortent en `|raw`, et l'équation est calibrée.**
+  Le bloc `meta_description` est échappé une fois par l'autoéchappement de
+  Twig ; le `|trim` de la coque perd le marquage « safe » (mesuré : le passage
+  par une variable suffit aussi), donc l'insertion ré-échappait. Le `|raw`
+  supprime le second échappement, pas le premier — l'audit des 49 blocs le
+  garantit (aucun `|raw`, aucun HTML, aucune entité en dur dedans), et
+  **l'équation tient tant qu'aucun bloc n'injecte du contenu non échappé**. La
+  clé `ogp.description`, qu'aucun contrôleur ne renseigne encore, s'échappe à
+  la source pour arriver dans le même état que la branche du bloc.
+- **Adjacence des communes : 6 388 couples écartés est le chiffre nominal.**
+  6 342 portent sur 1 559 communes fusionnées que le référentiel ne connaît
+  plus (Maine-et-Loire, Calvados, Manche, Orne en tête), 46 sur neuf communes
+  sans circonscription — les six villages détruits de Verdun, Sannerville,
+  L'Oie, Sainte-Florence. Le total ferme à l'unité :
+  218 852 = 212 464 + 6 388. Et **279 communes sans aucune voisine est
+  correct** : 224 villes de l'étranger (099), 55 îles. Si ces chiffres bougent,
+  c'est l'import qui a régressé. L'index PHP se fait en minuscules et
+  l'orthographe rendue est celle de la base — même modèle
+  qu'`ImportResultatsElectorauxCommand`, qui faisait déjà bien.
+- **Des « HTTP 000 » par centaines d'affilée = ports éphémères de Windows
+  épuisés**, pas un site en panne : des connexions en rafale sans réutilisation
+  vident la plage locale. Rejouer sur connexion persistante. À ranger avec les
+  faux 500 du banc multi-`php -S` de `CLAUDE.md` : des anomalies par tranches
+  contiguës accusent l'outillage, jamais le site.
+- **`|default()` remplace aussi les valeurs vides : `false|default(true)` rend
+  `true`.** Pour un booléen venu de la requête (`?secondary-title=hide`), le
+  repli s'écrit `is defined`, jamais `|default()` — le titre de l'iframe
+  restait affiché malgré le paramètre, et seule la capture l'a montré.
+- **L'espace connecté profond est comparé sur le code, pas sur capture.** Mon
+  compte, tableau de bord du député et espace de rédaction n'ont pas de compte
+  sur la production : leur parité (passe du 30 juillet) est établie contre les
+  vues et contrôleurs de `../datan`, rendues sous session locale. Une
+  divergence entre le code du legacy et ce que sert réellement datan.fr y
+  passerait inaperçue.
+- **`/admin/socialmedia/{page}` n'accepte que six valeurs nommées**
+  (`deputes_entrants`, `deputes_sortants`, `postes_assemblee`,
+  `groupes_entrants`, `historique`, `x`) : un `{page}` numérique répond 404
+  par construction — à savoir avant de conclure à une page cassée.
+- **L'iframe est un document autonome.** Elle n'hérite de rien de
+  `base.html.twig` : la police manquait, et le navigateur du tiers retombait sur
+  une sérif locale, ce qui change toute l'allure de l'embarqué. Même bloc
+  `@font-face` que la coque, comme le `_header_iframe.php` du legacy. Toute
+  déclaration globale ajoutée à la coque est à répercuter ici.
+- **`iframe/_positions.html.twig` est une copie de celui de la fiche.** Le
+  legacy charge le même partial dans les deux contextes, deux conditions
+  internes suffisant à couvrir l'embarqué ; nous ne pouvions pas le faire sans
+  toucher au périmètre de la fiche, d'où deux fichiers. Une retouche de
+  `depute/_positions.html.twig` est à répercuter — l'en-tête du fichier le dit,
+  mais rien ne l'impose.
+- **`?first-person=true` est mort sur datan.fr, pas chez nous.** Le cache de
+  sortie de CodeIgniter est aveugle à la chaîne de requête : la page d'iframe y
+  est servie octet pour octet identique avec et sans le paramètre (même MD5,
+  46 172 o). Le code du legacy implémente pourtant bien la 1re personne, et
+  c'est elle que nous rendons — divergence volontaire avec ce que le site
+  *affiche*, parité avec ce qu'il *dit*.
+- **Corrections typographiques assumées, à ne pas « ré-aligner » sur le site.**
+  Virgule décimale (`0,86` contre `0.86`), « Assemblée nationale » en minuscule
+  là où deux titres du legacy capitalisent, accords et coquilles des mentions
+  légales, « à la Réunion » contre « à la La Réunion », élision « d'Ajaccio ».
+  Chacune porte son commentaire dans le gabarit : sans lui, le prochain lecteur
+  y voit une erreur de portage et « répare » dans le mauvais sens.
+- **Deux phrases à trou du legacy ne sont pas reproduites.**
+  `/partis-politiques/<abrev>`, pour un parti sans député, publie
+  « Actuellement, député est rattaché » — un `if` refermé trop tôt ;
+  `/groupes/legislature-17/ni` publie « le groupe NI est le e plus gros
+  groupe », les non-inscrits n'ayant pas de rang. Dans les deux cas on retombe
+  sur la phrase que le site sert quand sa donnée est là. Commenté sur place.
+- **Des assets manquent sur datan.fr, pas chez nous.** Deux logos de partis
+  (REZRE, DEBOU), deux vignettes d'articles (posts 7 et 9, dont l'`image_nom`
+  est pourtant identique des deux côtés) et deux portraits de députés inactifs
+  (Brigitte Barèges, Pauline Levasseur — avec les 404 correspondants dans les
+  journaux du legacy) s'affichent chez nous et pas là-bas. Ne pas prendre ces
+  écarts pour une régression : c'est le site de référence qui est incomplet.
+- **Les cartes en vis-à-vis des statistiques ne montrent pas toutes le premier
+  du classement.** Quatre blocs sur cinq présentent le **dernier** à gauche
+  (« Le plus divisé », « Vote le moins », « Le moins de cadres », « Le moins
+  représentatif ») ; seul l'âge met le premier. Le sens appartient à l'appel, pas
+  au gabarit — ne pas uniformiser. De même, cinq des neuf libellés du menu
+  latéral diffèrent du titre de la page qu'ils ouvrent (« La proximité au
+  groupe » pour « La proximité des députés à leur groupe ») : d'où un tableau
+  `MENU` distinct des titres.
+- **Les non-inscrits comptent en participation de groupe, pas en cohésion.** La
+  page de participation les garde dans ses cartes — ils y arrivent derniers à
+  75 % — quand celle de cohésion les écarte. Les exclure des deux faisait
+  remonter GDR à leur place. Incohérent, mais c'est la règle du site.
+- **Un groupe rebaptisé en cours de législature dédouble ses coalitions — et
+  le recollage se borne à UDR→UDDPLR.** Sans recollage, la coalition
+  principale d'EPR comptait 777 scrutins au lieu de 1 183. Le site ne recolle
+  qu'**une** filiation (`clean_libelleAbrev()`, daily.php:4580) : depuis le
+  30 juillet, `GroupeController::SIGLES_CANONIQUES` fait de même. Ne pas
+  regénéraliser à `FamilleGroupe` : SOC et SOC-A restent distincts en 16e,
+  leurs coalitions se scindent au 19/10/2023 avec le badge SOC sur les lignes
+  d'avant — vérifié, c'est ce qu'affiche datan.fr. Quant au 1 184e scrutin du
+  site, il est élucidé et **irréductible** : `coalitions_groupes` est une
+  table jamais vidée — `INSERT … ON DUPLICATE KEY UPDATE` sans suppression, un
+  scrutin qui cesse de qualifier y laisse sa ligne pour toujours. Le compte du
+  site est une accumulation monotone, nécessairement supérieure ou égale à un
+  recalcul propre : 1 183 est le chiffre juste.
+- **API Platform expose en écriture par défaut.** Toute nouvelle entité
+  `#[ApiResource]` doit déclarer `operations: [new Get(), new GetCollection()]` ;
+  les deux règles d'`access_control` rattrapent (en 500) celle qui l'oublierait.
+  À revérifier à chaque entité exposée — le défaut est ouvert, pas fermé.
+- **L'encart « dernier vote important » de la fiche est codé en dur.** Comme le
+  legacy (`Deputes::index`), `DeputeController::voteFeature` pointe un scrutin
+  figé — 17e législature, n° 3684 (suspension de la réforme des retraites) — et le
+  texte de `_vote_feature.html.twig` est éditorial. Quand la rédaction met un autre
+  vote en avant, ces deux points changent ensemble ; seule la position du député y
+  est dynamique.
+- **Le backup public est un instantané daté.** Toute parité — URL, effectifs,
+  comptes, décryptages — se vérifie contre le site **vivant** : `deputes_last` y
+  portait un slug que datan.fr ne sert plus (Roubache). Deux écarts persistants
+  en relèvent, et **aucun n'est un défaut de portage** :
+  - **Christine Le Nabour** est EPR chez nous (son seul rattachement ouvert,
+    donc le calcul est juste) et HOR sur le site. D'où EPR 91 contre 90, HOR 35
+    contre 36, 45 femmes EPR contre 44, ESBMP 114 contre 113 — visible sur la
+    féminisation (HOR passe du 6e au 8e rang), le simulateur de coalition, la
+    représentativité, et le classement de loyauté qui compte 577 lignes contre
+    ses 576 (elle est la ligne en plus). Une moisson Tricoteuses le résoudra ;
+    les deux côtés totalisent bien 577.
+  - **Deux décryptages de juillet 2026** (acétamipride, aide à mourir) manquent
+    à notre table : 60 votes décryptés annoncés contre 62, 238 contre 240 sur
+    `/soutenir`, et le quiz — trié par `numero DESC` — tire trois scrutins
+    différents de ceux du site, puisque les manquants portent les numéros les
+    plus hauts. Récupération par `app:import:decryptages` (§2).
+- **Saint-Barthélemy / Saint-Martin interchangeables** dans la source
+  électorale (977/978), sans moyen de trancher : l'import émet un `[WARNING]`
+  nommant les deux communes — chiffres à vérifier avant publication.
+- **592 lignes de résultats électoraux écartées** (communes fusionnées depuis
+  le scrutin) : chiffre à surveiller — s'il gonfle, c'est `app:import:communes`
+  qui a régressé, pas la source.
 - **L'historique mensuel de proximité ne pondère pas par le nombre de
-  scrutins.** Le graphique de `/groupes/legislature-{n}/{abrev}/statistiques`
-  applique la règle d'accord mois par mois, sans seuil : septembre 2025 n'a
-  qu'**un seul scrutin** en 17e législature, et toute courbe y vaut donc 0 ou
-  100 %. Le mois de création d'un groupe produit le même artefact. Le site
-  d'origine se comporte à l'identique — parité assumée, pas un défaut d'import.
-  Si un jour ces pics gênent, la correction est un seuil (« au moins N scrutins
-  dans le mois ») ou l'effectif au survol ; ce serait alors une divergence
-  délibérée, à consigner. À ne pas confondre avec les **trous** des courbes,
-  eux volontaires : `spanGaps: false` interrompt le trait d'un groupe qui
-  n'existait pas encore ou plus, là où un zéro dirait qu'il ne votait jamais
-  comme les autres.
-- **22 scrutins d'amendement de la 17e législature restent sans rattachement**
-  après `app:lien:scrutins`. `app:scraper:scrutins` est le seul recours, et reste
-  volontairement hors de la chaîne quotidienne : c'est la seule étape qui
-  interroge un site public.
-- **Un import complet est mort une fois sans message** (22 juillet), sortie
-  tronquée au démarrage des européennes, non reproduit sur les quatre exécutions
-  suivantes. Le symptôme est exactement celui d'un `cache:clear` concurrent
-  décrit dans `CLAUDE.md`, et plusieurs serveurs de développement tournaient. À
-  rouvrir si cela se reproduit sans cette circonstance.
-- **Balayage hors-routes du legacy (25 juillet)** — ce que `routes.php` ne dit
-  pas et qui reste à la charge du déploiement ou d'un chantier dédié :
-  - **`scripts/daily.php` publie des jeux CSV sur data.gouv.fr**
-    (`opendata()`, téléversement par l'API) — ce sont les jeux que notre pied
-    de page pointe. Publication à replanifier au déploiement, hors de
-    `app:sync:quotidien`.
-  - **`daily.php` moissonne aussi les comptes Bluesky** (`addBsky()`) — versé
-    au chantier réseaux sociaux.
-  - Courriels : le legacy compose en **MJML** (`qferr/mjml-php`) et envoie par
-    **Mailjet** — newsletter mensuelle et transactionnels, au déploiement.
-  - `pfaciana/tiny-html-minifier` est au composer du legacy mais **introuvable
-    à l'usage** (ni hook ni core) : rien à porter.
-  - Hooks : `ssl.php` (redirection https, niveau serveur au déploiement),
-    `urlValidator` et `generalModal` déjà traités.
+  scrutins** : un mois à un seul scrutin vaut 0 ou 100 % (septembre 2025).
+  Parité assumée avec datan.fr ; la correction serait un seuil, donc une
+  divergence délibérée à consigner. Ne pas confondre avec les trous des
+  courbes (`spanGaps: false`), eux volontaires.
+- **Cadence des mandats en organe** : `fonction_commission` (COMPER) se
+  recharge par `app:import:commissions`, **hors sync**, quand les délégations
+  (`app:import:organes`) y sont — quirk assumé ; si l'écran « Postes
+  Assemblée » dérive entre ses deux moitiés, c'est là.
+- **Jamais d'auto-publication IA.** Le brouillon de décryptage et les résumés
+  d'amendements proposent, la rédaction dispose — le décryptage est la seule
+  donnée que Datan produit.
+- **Un import complet est mort une fois sans message** (22 juillet), signature
+  du `cache:clear` concurrent de CLAUDE.md, non reproduit depuis. À rouvrir
+  s'il récidive hors de cette circonstance.

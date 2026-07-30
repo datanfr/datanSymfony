@@ -2,6 +2,9 @@
 
 {% set decrypte = scrutin.decryptage_title is not empty %}
 {% set titre_affiche = decrypte ? scrutin.decryptage_title : scrutin.titre %}
+{# Le Congrès a sa propre série de numéros : le numéro affiché est négatif, et
+   les liens de navigation doivent viser `vote_c<n>`. #}
+{% set est_congres = numero_affiche < 0 %}
 
 {% block title %}{{ titre_affiche }} - Vote n°{{ numero_affiche|congress_numero }} - Datan{% endblock %}
 
@@ -9,10 +12,14 @@
 
 {% block stylesheets %}
   <link rel="stylesheet" type="text/css" href="{{ asset('assets/css/datatables.bootstrap4.min.css') }}">
+  {# Flickity habille le carrousel des derniers décryptés du pied de page. #}
+  <link rel="stylesheet" type="text/css" href="{{ asset('assets/css/flickity.min.css') }}">
 {% endblock %}
 
 {% block javascripts_head %}
   <script src="{{ asset('assets/js/dist/chart.min.js') }}"></script>
+  {# Flickity avant main.min.js, qui initialise `.carousel-container`. #}
+  <script src="{{ asset('assets/js/libraries/flickity/flickity.pkgd.min.js') }}"></script>
 {% endblock %}
 
 {% block body %}
@@ -95,8 +102,10 @@
       <div class="mt-5">
         <h2>La position des groupes</h2>
         <div class="mt-4 bloc-groupes d-flex flex-column flex-lg-row">
+          {# Non-inscrits écartés ici aussi : le legacy les filtre avant de rendre
+             la page, ils n'ont ni logo ni position de groupe. #}
           {% for position, couleur in {'pour': '0, 183, 148', 'contre': '197, 40, 61'} %}
-            {% set groupes_position = groupes|filter(g => g.positionMajoritaire == position) %}
+            {% set groupes_position = groupes|filter(g => g.positionMajoritaire == position and g.libelle_abrev != 'NI') %}
             {% if groupes_position|length %}
               <div class="bloc-groupe d-flex justify-content-center">
                 <div class="card m-2" style="border: 0.5px solid rgba({{ couleur }}, 1)">
@@ -165,6 +174,25 @@
       {% endif %}
       <div class="bloc-social d-none d-md-block mt-5">
         <h3 class="subtitle">Partagez ce vote</h3>
+        {# Les boutons de partage étaient absents (titre seul) : main.min.js les
+           branche sur les classes `social-share <réseau>`, comme ailleurs. #}
+        <div class="d-flex flex-row flex-wrap social-share-bloc">
+          <button type="button" name="button" class="btn social-share twitter twitter-bg d-flex">
+            <img src="{{ asset('assets/imgs/logos/x-no-round.svg') }}" alt="Partagez sur X" width="24" height="20">
+          </button>
+          <button type="button" name="button" class="btn social-share facebook fcb-bg d-flex">
+            <img src="{{ asset('assets/imgs/logos/facebook-no-round.svg') }}" alt="Partagez sur Facebook" width="20" height="10">
+            <span>Facebook</span>
+          </button>
+          <button type="button" name="button" class="btn social-share linkedin linkedin-bg d-flex">
+            <img src="{{ asset('assets/imgs/logos/linkedin-no-round.svg') }}" alt="Partagez sur Linkedin" width="20" height="20">
+            <span>Linkedin</span>
+          </button>
+          <button type="button" name="button" class="mobileShow btn social-share whatsapp whatsapp-bg d-flex">
+            <img src="{{ asset('assets/imgs/logos/whatsapp-no-round.png') }}" alt="Partagez sur Whatsapp" width="20" height="20">
+            <span>Whatsapp</span>
+          </button>
+        </div>
       </div>
     </div>
   </div>
@@ -233,12 +261,21 @@
                 <th scope="col" class="text-center min-tablet">Abstention</th>
                 <th scope="col" class="text-center min-tablet">Contre</th>
                 <th scope="col" class="text-center">Participation</th>
-                <th scope="col" class="text-center min-tablet">Cohésion</th>
+                <th scope="col" class="text-center min-tablet">
+                  Cohésion
+                  <a tabindex="0" role="button" data-toggle="popover" data-trigger="focus" data-html="true" title="Taux de cohésion" aria-label="Aide cohésion"
+                     data-content="Le taux de cohésion représente <b>l'unité d'un groupe politique</b> lorsqu'il vote. Il peut prendre des mesures allant de 0 à 1. Un taux proche de 1 signifie que le groupe est très uni.<br><br>Pour plus d'information, <a href='{{ path('page_statistiques') }}#cohesion' target='_blank'>cliquez ici</a>.">
+                    <svg width="1em" height="1em" viewBox="0 0 16 16" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" d="M16 8A8 8 0 1 1 0 8a8 8 0 0 1 16 0zM6.57 6.033H5.25C5.22 4.147 6.68 3.5 8.006 3.5c1.397 0 2.673.73 2.673 2.24 0 1.08-.635 1.594-1.244 2.057-.737.559-1.01.768-1.01 1.486v.355H7.117l-.007-.463c-.038-.927.495-1.498 1.168-1.987.59-.444.965-.736.965-1.371 0-.825-.628-1.168-1.314-1.168-.901 0-1.358.603-1.358 1.384zm1.251 6.443c-.584 0-1.009-.394-1.009-.927 0-.552.425-.94 1.01-.94.609 0 1.028.388 1.028.94 0 .533-.42.927-1.029.927z"/></svg>
+                  </a>
+                </th>
                 <th class="pl-4"></th>
               </tr>
             </thead>
             <tbody>
-              {% for groupe in groupes %}
+              {# Les non-inscrits sont écartés du tableau (`array_filter` sur
+                 libelleAbrev !== 'NI' du legacy) : ils ne forment pas un groupe,
+                 leur « position majoritaire » n'engage personne. #}
+              {% for groupe in groupes|filter(g => g.libelle_abrev != 'NI') %}
                 <tr>
                   <td class="name">
                     <a href="{{ path('groupe_individual', {legislature: groupe.legislature, abrev: groupe.libelle_abrev|lower}) }}" target="_blank" class="no-decoration underline">
@@ -252,7 +289,9 @@
                   <td class="text-center">{{ groupe.nombreAbstentions }}</td>
                   <td class="text-center">{{ groupe.nombreContres }}</td>
                   <td class="text-center">{{ groupe.percentageVotants }} %</td>
-                  <td class="text-center">{{ groupe.cohesion }}</td>
+                  {# Trois décimales, comme datan.fr (« 1.000 », « 0.972 ») :
+                     c'est un DECIMAL(4,3) rendu tel quel par le legacy. #}
+                  <td class="text-center">{{ groupe.cohesion is null ? '' : groupe.cohesion|number_format(3, '.', '') }}</td>
                   <td></td>
                 </tr>
               {% endfor %}
@@ -300,8 +339,9 @@
       {% if scrutin.amendement_expose %}
         <div class="mt-5">
           <h2>Exposé des motifs de l'amendement</h2>
-          <div class="card mt-4">
-            <div class="card-body">
+          <p class="mt-4 font-italic">L'objectif d'un amendement est de modifier ou d'ajouter une mesure d'un projet ou d'une proposition de loi. Le ou les députés qui rédigent l'amendement écrivent également un exposé des motifs.</p>
+          <div class="card">
+            <div class="card-body" id="exposeMotifs">
               {% if '<p>' in scrutin.amendement_expose %}
                 {{ scrutin.amendement_expose|raw }}
               {% else %}
@@ -309,34 +349,118 @@
               {% endif %}
             </div>
           </div>
+          {% if scrutin.amendement_href %}
+            <p class="mt-3">Source : <span class="url_obf" url_obf="{{ url_obf(scrutin.amendement_href) }}">Amendement sur le site de l'Assemblée nationale</span></p>
+          {% endif %}
         </div>
       {% endif %}
     </div>
   </div>
 </div>
+
+{# Barre « Précédent / Tous les votes / Suivant », pleine largeur sur fond bleu. #}
+<div class="container-fluid pg-vote-individual mt-5" id="container-always-fluid">
+  <div class="row votes-next d-flex flex-row align-items-center justify-content-center py-4">
+    {% if voisins.precedent %}
+      <a class="btn d-flex align-items-center mx-1 mx-md-2" role="button"
+         href="{{ path(est_congres ? 'vote_congres' : 'vote_individual', {legislature: scrutin.legislature, numero: voisins.precedent}) }}">
+        <svg width="1em" height="1em" viewBox="0 0 16 16" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" d="M5.854 4.646a.5.5 0 0 1 0 .708L3.207 8l2.647 2.646a.5.5 0 0 1-.708.708l-3-3a.5.5 0 0 1 0-.708l3-3a.5.5 0 0 1 .708 0z"/><path fill-rule="evenodd" d="M2.5 8a.5.5 0 0 1 .5-.5h10.5a.5.5 0 0 1 0 1H3a.5.5 0 0 1-.5-.5z"/></svg>
+        <span class="d-none d-md-block ml-2">Précédent</span>
+      </a>
+    {% endif %}
+    <a class="btn mx-1 mx-md-2 d-flex align-items-center" role="button" href="{{ path('votes_legislature', {legislature: scrutin.legislature}) }}">Tous les votes</a>
+    {% if voisins.suivant %}
+      <a class="btn d-flex align-items-center mx-1 mx-md-2" role="button"
+         href="{{ path(est_congres ? 'vote_congres' : 'vote_individual', {legislature: scrutin.legislature, numero: voisins.suivant}) }}">
+        <span class="d-none d-md-block mr-2">Suivant</span>
+        <svg width="1em" height="1em" viewBox="0 0 16 16" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" d="M10.146 4.646a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1 0 .708l-3 3a.5.5 0 0 1-.708-.708L12.793 8l-2.647-2.646a.5.5 0 0 1 0-.708z"/><path fill-rule="evenodd" d="M2 8a.5.5 0 0 1 .5-.5H13a.5.5 0 0 1 0 1H2.5A.5.5 0 0 1 2 8z"/></svg>
+      </a>
+    {% endif %}
+  </div>
+</div>
+
+{# Carrousel « Les derniers votes décryptés par Datan », comme en pied de la
+   page d'origine (Flickity sur .carousel-container). #}
+{% if derniers_decryptes %}
+  <div class="container pg-vote-individual">
+    <div class="row votes-decryptes mb-5">
+      <div class="col-12 py-5">
+        <h2>Les derniers votes décryptés par Datan</h2>
+      </div>
+      <div class="col-12 carousel-container bloc-carousel-votes-flickity">
+        <div class="carousel-cards">
+          {% for d in derniers_decryptes %}
+            <div class="card card-vote">
+              <div class="thumb d-flex align-items-center {{ d.sort_code }}">
+                <div class="d-flex align-items-center"><span>{{ d.sort_code|upper }}</span></div>
+              </div>
+              <div class="card-header d-flex flex-row justify-content-between">
+                <span class="date">{{ d.date_scrutin|date_abregee }}</span>
+              </div>
+              <div class="card-body d-flex flex-column justify-content-center">
+                <span class="title">
+                  <a href="{{ lien_vote(d.legislature, d.vote_numero) }}" class="stretched-link no-decoration">{{ d.title }}</a>
+                </span>
+                {% if d.lecture_name %}<span class="reading mt-2">{{ d.lecture_name }}</span>{% endif %}
+              </div>
+              {% if d.categorie_name %}
+                <div class="card-footer">
+                  <span class="field badge badge-primary py-1 px-2">{{ d.categorie_name }}</span>
+                </div>
+              {% endif %}
+            </div>
+          {% endfor %}
+        </div>
+        <div class="carousel-buttons d-flex justify-content-center">
+          <button type="button" class="btn prev mr-2 carousel--prev" aria-label="précédent">
+            <svg width="1em" height="1em" viewBox="0 0 16 16" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" d="M5.854 4.646a.5.5 0 0 1 0 .708L3.207 8l2.647 2.646a.5.5 0 0 1-.708.708l-3-3a.5.5 0 0 1 0-.708l3-3a.5.5 0 0 1 .708 0z"/><path fill-rule="evenodd" d="M2.5 8a.5.5 0 0 1 .5-.5h10.5a.5.5 0 0 1 0 1H3a.5.5 0 0 1-.5-.5z"/></svg>
+          </button>
+          <a class="btn btn-primary mx-2" href="{{ path('votes_decryptes') }}">Tous les votes</a>
+          <button type="button" class="btn next ml-2 carousel--next" aria-label="suivant">
+            <svg width="1em" height="1em" viewBox="0 0 16 16" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" d="M10.146 4.646a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1 0 .708l-3 3a.5.5 0 0 1-.708-.708L12.793 8l-2.647-2.646a.5.5 0 0 1 0-.708z"/><path fill-rule="evenodd" d="M2 8a.5.5 0 0 1 .5-.5H13a.5.5 0 0 1 0 1H2.5A.5.5 0 0 1 2 8z"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+{% endif %}
 {% endblock %}
 
 {% block infos_table %}
+  {# Icônes en tête de ligne, comme `individual.php` (calendar / journal /
+     folder inlinés) : `main.css` les colore via `.infos .icon svg`. #}
   <table class="infos">
     <tbody>
       <tr>
+        <td class="icon"><svg width="1em" height="1em" viewBox="0 0 16 16" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M3.5 0a.5.5 0 0 1 .5.5V1h8V.5a.5.5 0 0 1 1 0V1h1a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V3a2 2 0 0 1 2-2h1V.5a.5.5 0 0 1 .5-.5zM1 4v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V4H1z"/></svg></td>
         <td class="label d-none d-lg-table-cell">Date</td>
         <td class="value">{{ date_scrutin_fr }}</td>
       </tr>
-      {% if scrutin.type_vote %}
+      {% if type_edito %}
         <tr>
+          <td class="icon"><svg width="1em" height="1em" viewBox="0 0 16 16" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M3 0h10a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2v-1h1v1a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1H3a1 1 0 0 0-1 1v1H1V2a2 2 0 0 1 2-2z"/><path d="M1 5v-.5a.5.5 0 0 1 1 0V5h.5a.5.5 0 0 1 0 1h-2a.5.5 0 0 1 0-1H1zm0 3v-.5a.5.5 0 0 1 1 0V8h.5a.5.5 0 0 1 0 1h-2a.5.5 0 0 1 0-1H1zm0 3v-.5a.5.5 0 0 1 1 0v.5h.5a.5.5 0 0 1 0 1h-2a.5.5 0 0 1 0-1H1z"/></svg></td>
           <td class="label d-none d-lg-table-cell">Type de vote</td>
-          <td class="value">{{ scrutin.type_vote|capitalize }}</td>
+          <td class="value">
+            {{ type_edito.libelle|capitalize }}
+            {% if type_edito.explication %}
+              <a class="ml-1 no-decoration" tabindex="0" role="button" data-toggle="popover" data-trigger="focus" data-html="true"
+                 aria-label="Explication du type de vote" data-content="{{ type_edito.explication }}">
+                <svg width="1em" height="1em" viewBox="0 0 16 16" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" d="M16 8A8 8 0 1 1 0 8a8 8 0 0 1 16 0zM6.57 6.033H5.25C5.22 4.147 6.68 3.5 8.006 3.5c1.397 0 2.673.73 2.673 2.24 0 1.08-.635 1.594-1.244 2.057-.737.559-1.01.768-1.01 1.486v.355H7.117l-.007-.463c-.038-.927.495-1.498 1.168-1.987.59-.444.965-.736.965-1.371 0-.825-.628-1.168-1.314-1.168-.901 0-1.358.603-1.358 1.384zm1.251 6.443c-.584 0-1.009-.394-1.009-.927 0-.552.425-.94 1.01-.94.609 0 1.028.388 1.028.94 0 .533-.42.927-1.029.927z"/></svg>
+              </a>
+            {% endif %}
+          </td>
         </tr>
       {% endif %}
       {% if scrutin.lecture_name %}
         <tr>
+          <td class="icon"><svg width="1em" height="1em" viewBox="0 0 16 16" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M1 2.828c.885-.37 2.154-.769 3.388-.893 1.33-.134 2.458.063 3.112.752v9.746c-.935-.53-2.12-.603-3.213-.493-1.18.12-2.37.461-3.287.811V2.828zm7.5-.141c.654-.689 1.782-.886 3.112-.752 1.234.124 2.503.523 3.388.893v9.923c-.918-.35-2.107-.692-3.287-.81-1.094-.111-2.278-.039-3.213.492V2.687zM8 1.783C7.015.936 5.587.81 4.287.94c-1.514.153-3.042.672-3.994 1.105A.5.5 0 0 0 0 2.5v11a.5.5 0 0 0 .707.455c.882-.4 2.303-.881 3.68-1.02 1.409-.142 2.59.087 3.223.877a.5.5 0 0 0 .78 0c.633-.79 1.814-1.019 3.222-.877 1.378.139 2.8.62 3.681 1.02A.5.5 0 0 0 16 13.5v-11a.5.5 0 0 0-.293-.455c-.952-.433-2.48-.952-3.994-1.105C10.413.809 8.985.936 8 1.783z"/></svg></td>
           <td class="label d-none d-lg-table-cell">Lecture</td>
           <td class="value">{{ scrutin.lecture_name }}</td>
         </tr>
       {% endif %}
       {% if scrutin.dossier_titre %}
         <tr>
+          <td class="icon"><svg width="1em" height="1em" viewBox="0 0 16 16" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M.54 3.87.5 3a2 2 0 0 1 2-2h3.672a2 2 0 0 1 1.414.586l.828.828A2 2 0 0 0 9.828 3h3.982a2 2 0 0 1 1.992 2.181l-.637 7A2 2 0 0 1 13.174 14H2.826a2 2 0 0 1-1.991-1.819l-.637-7a1.99 1.99 0 0 1 .342-1.31zM2.19 4a1 1 0 0 0-.996 1.09l.637 7a1 1 0 0 0 .995.91h10.348a1 1 0 0 0 .995-.91l.637-7A1 1 0 0 0 13.81 4H2.19z"/></svg></td>
           <td class="label d-none d-lg-table-cell">Dossier</td>
           <td class="value">{{ scrutin.dossier_titre }}</td>
         </tr>

@@ -1,0 +1,316 @@
+<?php
+
+namespace App\Command;
+
+use App\Legislature;
+use Doctrine\DBAL\Connection;
+use Symfony\Component\Console\Attribute\AsCommand;
+use Symfony\Component\Console\Command\Command;
+use Symfony\Component\Console\Input\InputInterface;
+use Symfony\Component\Console\Output\OutputInterface;
+use Symfony\Component\Console\Style\SymfonyStyle;
+
+/**
+ * Précalcule les statistiques de comportement des députés qui alimentent les
+ * cartes « Son comportement politique » de la fiche : participation aux scrutins
+ * solennels, proximité (loyauté) avec le groupe, et proximité avec chaque groupe.
+ *
+ * L'application d'origine tient ces tables (`class_participation_solennels`,
+ * `class_loyaute`, `deputes_accord_cleaned`) à jour chaque nuit dans `daily.php`,
+ * parce que ces cartes comparent le député à la MOYENNE de tous les députés et de
+ * son groupe — moyennes qu'on ne peut pas rejouer sur 1,27 M de votes à chaque
+ * affichage. On fait de même : cette commande remplit `statistique_depute` et
+ * `accord_groupe`, la fiche s'y lit en DBAL.
+ *
+ * **Hors `app:sync:quotidien`, mais à relancer après chaque import de votes** :
+ * un nouveau scrutin décale participation, loyauté et proximité. Comme les autres
+ * précalculs, on la lance sciemment (l'agrégation d'accord prend ~15 s).
+ *
+ * Les votes nominatifs n'existent que pour la 17e législature (cf. CLAUDE.md) :
+ * ces tables ne portent qu'elle, et une fiche d'une législature antérieure se
+ * tait faute de données.
+ */
+#[AsCommand(
+    name: 'app:calcul:statistiques-deputes',
+    description: 'Précalcule participation, loyauté et proximité par groupe pour la fiche député.',
+)]
+class CalculStatistiquesDeputesCommand extends Command
+{
+    /** Code des scrutins publics solennels, sur lesquels se mesure la participation. */
+    private const SOLENNEL = 'SPS';
+
+    /** Seul type de vote qui compte une position (les autres sont des mises au point). */
+    private const OFFICIEL = 'decompteNominatif';
+
+    /** Position d'un député qui n'avait pas le droit de voter : ce n'est pas une absence. */
+    private const NON_VOTANT = 'nonVotant';
+
+    /** Borne haute conventionnelle d'un rattachement ou d'un mandat encore ouvert. */
+    private const SANS_FIN = '9999-12-31';
+
+    /**
+     * Le rattachement à un groupe qui fait foi pour un député : le plus récent —
+     * encore ouvert d'abord, puis la date de fin la plus tardive
+     * (`daily.php:914`) —, et principal, car onze députés de la 17e en portent
+     * deux ouverts à la fois.
+     *
+     * Passer par cette table plutôt que par `depute.groupe_id` n'est pas un
+     * raffinement : `groupe_id` ne porte que l'appartenance **courante**, et un
+     * député sorti de l'Assemblée n'en a plus aucune. Soixante-huit des
+     * 645 votants de la 17e — ministres nommés, démissionnaires, suppléés —
+     * perdaient ainsi toute leur loyauté, et leur fiche la carte « Proximité
+     * avec son groupe » que datan.fr leur affiche.
+     */
+    private const RATTACHEMENT = "(SELECT depute_id, groupe_id, date_debut, date_fin
+                                   FROM (SELECT fg.depute_id, fg.groupe_id, fg.date_debut,
+                                                COALESCE(fg.date_fin, '" . self::SANS_FIN . "') AS date_fin,
+                                                ROW_NUMBER() OVER (
+                                                    PARTITION BY fg.depute_id
+                                                    ORDER BY COALESCE(fg.date_fin, '" . self::SANS_FIN . "') DESC,
+                                                             fg.date_debut DESC,
+                                                             fg.groupe_id ASC) AS n
+                                         FROM fonction_groupe fg
+                                         JOIN groupe g ON g.id = fg.groupe_id AND g.legislature = :leg
+                                         WHERE fg.nomin_principale = 1) classes
+                                   WHERE n = 1)";
+
+    private const LOT = 500;
+
+    public function __construct(private readonly Connection $connection)
+    {
+        parent::__construct();
+    }
+
+    protected function execute(InputInterface $input, OutputInterface $output): int
+    {
+        $io = new SymfonyStyle($input, $output);
+        $io->title('Précalcul des statistiques de comportement des députés');
+        $legislature = Legislature::COURANTE;
+
+        $this->connection->executeStatement('DELETE FROM statistique_depute');
+        $this->connection->executeStatement('DELETE FROM accord_groupe');
+
+        $io->text('Participation et loyauté…');
+        $lignes = $this->statistiquesDeputes($legislature);
+        $this->inserer(
+            'statistique_depute (depute_id, legislature, participation_score, participation_votes, loyaute_score, loyaute_votes, actif)',
+            '(?, ?, ?, ?, ?, ?, ?)',
+            $lignes,
+        );
+        $io->text(sprintf('  %d députés.', \count($lignes)));
+
+        $io->text('Proximité par groupe (agrégation sur tous les votes)…');
+        $accords = $this->accordsParGroupe($legislature);
+        $this->inserer(
+            'accord_groupe (depute_id, groupe_id, legislature, accord, votes_n)',
+            '(?, ?, ?, ?, ?)',
+            $accords,
+        );
+        $io->text(sprintf('  %d couples député × groupe.', \count($accords)));
+
+        $io->success('Statistiques précalculées.');
+
+        return Command::SUCCESS;
+    }
+
+    /**
+     * Une ligne `statistique_depute` par député ayant voté sous la législature.
+     *
+     * Participation et loyauté suivent les mêmes règles que
+     * {@see \App\Command\CalculClassementsCommand} — sans quoi la fiche d'un
+     * député annoncerait un taux et le classement des députés un autre :
+     *
+     * - la participation rapporte les votes exprimés aux scrutins solennels
+     *   tenus pendant le **mandat** du député, non pendant l'intervalle de ses
+     *   votes connus, et retire du dénominateur les scrutins où il était
+     *   non-votant (présidence de séance, Gouvernement), qui ne sont pas des
+     *   absences ;
+     * - la loyauté se mesure contre le groupe où le député siégeait, lu dans
+     *   `fonction_groupe` et borné aux dates de ce rattachement.
+     *
+     * @return list<list<int|null>>
+     */
+    private function statistiquesDeputes(int $legislature): array
+    {
+        // Exprimés et non-votants solennels par député. Le filtre de législature
+        // n'est pas décoratif : `vote` porte aussi les nominatifs de deux scrutins
+        // de la 16e (les « positions importantes », importés ponctuellement) — sans
+        // lui, un réélu compterait les solennels d'une autre législature.
+        $comptes = $this->connection->fetchAllAssociative(
+            "SELECT v.depute_id,
+                    SUM(s.code_type_vote = :sps AND v.vote_type = :officiel
+                        AND v.position IN ('pour','contre','abstention')) AS exprimes,
+                    SUM(s.code_type_vote = :sps AND v.vote_type = :officiel
+                        AND v.position = :nonvotant) AS retires
+             FROM vote v
+             JOIN scrutin s ON s.id = v.scrutin_id AND s.legislature = :leg
+             GROUP BY v.depute_id",
+            [
+                'sps' => self::SOLENNEL,
+                'officiel' => self::OFFICIEL,
+                'nonvotant' => self::NON_VOTANT,
+                'leg' => $legislature,
+            ],
+        );
+
+        // Dénominateur : scrutins solennels tenus pendant que le député siégeait.
+        // Les bornes de ses **rattachements de groupe**, et non l'intervalle de
+        // ses votes : l'absent d'un bout à l'autre doit compter comme absent, or
+        // une absence ne laisse aucune ligne dans `vote`. Et non plus les bornes
+        // de son mandat, dont l'Assemblée ne garde que la dernière version —
+        // {@see \App\Command\CalculClassementsCommand::fenetresDeSession()}
+        // détaille pourquoi, et les deux commandes doivent compter pareil : la
+        // fiche et le classement annoncent le même taux.
+        $totaux = $this->compteSolennels($legislature);
+
+        $loyautes = $this->connection->fetchAllAssociative(
+            "SELECT v.depute_id,
+                    COUNT(*) AS total,
+                    SUM(v.position = vg.position_majoritaire) AS conformes
+             FROM vote v
+             JOIN scrutin s ON s.id = v.scrutin_id AND s.legislature = :leg
+             JOIN " . self::RATTACHEMENT . " r ON r.depute_id = v.depute_id
+             JOIN vote_groupe vg ON vg.scrutin_id = v.scrutin_id AND vg.groupe_id = r.groupe_id
+             WHERE v.vote_type = :officiel AND v.position IN ('pour','contre','abstention')
+               AND DATE(v.scrutin_date) BETWEEN r.date_debut AND r.date_fin
+             GROUP BY v.depute_id",
+            ['officiel' => self::OFFICIEL, 'leg' => $legislature],
+        );
+        $loyauteParDepute = [];
+        foreach ($loyautes as $l) {
+            $loyauteParDepute[(int) $l['depute_id']] = $l;
+        }
+
+        $actifs = array_flip(array_map('intval', $this->connection->fetchFirstColumn(
+            'SELECT DISTINCT depute_id FROM mandat WHERE legislature = :leg AND date_fin IS NULL',
+            ['leg' => $legislature],
+        )));
+
+        $lignes = [];
+        foreach ($comptes as $f) {
+            $deputeId = (int) $f['depute_id'];
+            $total = (int) ($totaux[$deputeId] ?? 0) - (int) $f['retires'];
+            $exprimes = (int) $f['exprimes'];
+            $participationScore = $total > 0 ? (int) round($exprimes / $total * 100) : null;
+
+            $loyauteTotal = 0;
+            $loyauteScore = null;
+            if (isset($loyauteParDepute[$deputeId])) {
+                $loyauteTotal = (int) $loyauteParDepute[$deputeId]['total'];
+                $loyauteScore = $loyauteTotal > 0
+                    ? (int) round((int) $loyauteParDepute[$deputeId]['conformes'] / $loyauteTotal * 100)
+                    : null;
+            }
+
+            $lignes[] = [
+                $deputeId,
+                $legislature,
+                $participationScore,
+                $total,
+                $loyauteScore,
+                $loyauteTotal,
+                isset($actifs[$deputeId]) ? 1 : 0,
+            ];
+        }
+
+        return $lignes;
+    }
+
+    /**
+     * Nombre de scrutins solennels tenus pendant que chaque député siégeait.
+     *
+     * Une seule requête ramène les périodes de présence et les dates de
+     * scrutin ; le croisement se fait en mémoire, sur des listes triées, plutôt
+     * qu'en SQL — 577 députés contre 72 dates, la jointure ne vaut pas le
+     * détour.
+     *
+     * @return array<int, int>
+     */
+    private function compteSolennels(int $legislature): array
+    {
+        $dates = $this->connection->fetchFirstColumn(
+            'SELECT DATE(date_scrutin) FROM scrutin
+             WHERE legislature = :leg AND code_type_vote = :sps
+             ORDER BY date_scrutin',
+            ['leg' => $legislature, 'sps' => self::SOLENNEL],
+        );
+
+        // Tous les rattachements, principaux ou non : on réunit des présences,
+        // on ne choisit pas un groupe. Ceux d'un président de groupe ne portent
+        // pas le même drapeau que ceux d'un simple membre.
+        $lignes = $this->connection->fetchAllAssociative(
+            'SELECT fg.depute_id, fg.date_debut AS debut,
+                    COALESCE(fg.date_fin, :sansFin) AS fin
+             FROM fonction_groupe fg
+             JOIN groupe g ON g.id = fg.groupe_id AND g.legislature = :leg
+             WHERE fg.date_debut IS NOT NULL
+             ORDER BY fg.depute_id, fg.date_debut',
+            ['leg' => $legislature, 'sansFin' => self::SANS_FIN],
+        );
+
+        $totaux = [];
+
+        foreach ($lignes as $ligne) {
+            $deputeId = (int) $ligne['depute_id'];
+            $totaux[$deputeId] ??= [];
+
+            foreach ($dates as $rang => $date) {
+                if ($date >= $ligne['debut'] && $date <= $ligne['fin']) {
+                    // Indexé par le rang du scrutin, jamais par sa date : deux
+                    // rattachements consécutifs se touchent et le scrutin de la
+                    // charnière ne doit compter qu'une fois, mais **plusieurs
+                    // scrutins solennels se tiennent le même jour** — les 72 de
+                    // la 17e ne couvrent que 50 journées. Dédupliquer sur la
+                    // date en effaçait 22 et donnait 144 % à qui avait tout voté.
+                    $totaux[$deputeId][$rang] = true;
+                }
+            }
+        }
+
+        return array_map('\count', $totaux);
+    }
+
+    /**
+     * Proximité de chaque député avec chaque groupe : part des scrutins où sa
+     * position rejoint la position majoritaire du groupe (`deputes_accord`).
+     * `votes_n` compte les scrutins comparables ; la fiche écartera les couples
+     * sous onze votes.
+     *
+     * @return list<list<int>>
+     */
+    private function accordsParGroupe(int $legislature): array
+    {
+        $lignes = $this->connection->fetchAllAssociative(
+            "SELECT v.depute_id, vg.groupe_id,
+                    COUNT(*) AS votes_n,
+                    ROUND(AVG(v.position = vg.position_majoritaire) * 100) AS accord
+             FROM vote v
+             JOIN vote_groupe vg ON vg.scrutin_id = v.scrutin_id
+             JOIN scrutin s ON s.id = v.scrutin_id AND s.legislature = :leg
+             WHERE v.vote_type = :officiel AND v.position IN ('pour','contre','abstention')
+               AND vg.position_majoritaire IS NOT NULL
+             GROUP BY v.depute_id, vg.groupe_id",
+            ['leg' => $legislature, 'officiel' => self::OFFICIEL],
+        );
+
+        return array_map(
+            fn (array $l) => [(int) $l['depute_id'], (int) $l['groupe_id'], $legislature, (int) $l['accord'], (int) $l['votes_n']],
+            $lignes,
+        );
+    }
+
+    /**
+     * Insertion par lots : un seul INSERT multi-lignes tous les 500 tuples.
+     *
+     * @param list<list<int|null>> $lignes
+     */
+    private function inserer(string $cible, string $gabarit, array $lignes): void
+    {
+        foreach (array_chunk($lignes, self::LOT) as $lot) {
+            $this->connection->executeStatement(
+                'INSERT INTO ' . $cible . ' VALUES ' . implode(', ', array_fill(0, \count($lot), $gabarit)),
+                array_merge(...$lot),
+            );
+        }
+    }
+}

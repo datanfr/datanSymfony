@@ -3,7 +3,9 @@
 namespace App\Controller;
 
 use App\CouleurGroupe;
+use App\Groupe\SoutienGouvernement;
 use App\Legislature;
+use App\Twig\DatanExtension;
 use Doctrine\DBAL\Connection;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\Response;
@@ -44,8 +46,10 @@ class HomeController extends AbstractController
         'GDR', 'LFI-NFP', 'SOC', 'ECOS', 'EPR', 'DEM', 'HOR', 'LIOT', 'DR', 'UDDPLR', 'RN', 'NI',
     ];
 
-    public function __construct(private readonly Connection $connection)
-    {
+    public function __construct(
+        private readonly Connection $connection,
+        private readonly SoutienGouvernement $soutienGouvernement,
+    ) {
     }
 
     #[Route('/', name: 'home', methods: ['GET'])]
@@ -53,17 +57,36 @@ class HomeController extends AbstractController
     {
         $groupes = $this->groupesHemicycle(Legislature::COURANTE);
 
+        // « Quels groupes soutiennent le gouvernement ? » : même décompte que le
+        // comparatif de la fiche de groupe. Le groupe d'opposition le plus
+        // proche du gouvernement est le premier de la liste hors majorité.
+        $soutienGroupes = $this->soutienGouvernement->tousLesGroupes(Legislature::COURANTE);
+        $soutienOpposition = null;
+        foreach ($soutienGroupes as $ligne) {
+            if (!\in_array($ligne['libelle_abrev'], SoutienGouvernement::MAJORITE, true)) {
+                $soutienOpposition = $ligne;
+                break;
+            }
+        }
+
         $response = $this->render('home/index.html.twig', [
             'legislature' => Legislature::COURANTE,
             'groupes' => $groupes,
             // Les non-inscrits ne comptent pas comme un groupe politique.
             'nombre_groupes' => count(array_filter($groupes, static fn (array $g) => $g['libelle_abrev'] !== self::NON_INSCRITS)),
             'blocs' => $this->blocs($groupes),
-            'hemicycle' => $this->hemicycle($groupes),
+            // L'hémicycle est dessiné par Chart.js (donut + bulles d'effectif),
+            // comme sur datan.fr — les groupes y vont de la gauche à la droite
+            // de l'hémicycle.
+            'groupes_hemicycle' => $this->ordreHemicycle($groupes),
             'effectif_total' => array_sum(array_column($groupes, 'effectif')),
             'decryptages' => $this->derniersDecryptages(),
             'explications' => $this->dernieresExplications(),
             'placeholder' => $this->placeholderRecherche(),
+            'posts' => $this->derniersArticles(),
+            'soutien_groupes' => $soutienGroupes,
+            'soutien_opposition' => $soutienOpposition,
+            'majorite' => SoutienGouvernement::MAJORITE,
         ]);
 
         $response->setPublic();
@@ -147,60 +170,47 @@ class HomeController extends AbstractController
     }
 
     /**
-     * Découpe de l'hémicycle en arcs, de la gauche à la droite de l'hémicycle.
-     *
-     * Le site d'origine dessine ce demi-cercle avec Chart.js ; le tracé est ici
-     * calculé côté serveur et rendu en SVG, ce qui évite de charger une
-     * bibliothèque de graphiques sur la page la plus visitée.
+     * Groupes rangés de la gauche à la droite de l'hémicycle, pour le donut
+     * Chart.js (`Groupes_model::get_groupes_sorted()`).
      *
      * @param list<array<string, mixed>> $groupes
      *
-     * @return list<array<string, mixed>> chaque entrée porte le tracé SVG de son arc
+     * @return list<array<string, mixed>>
      */
-    private function hemicycle(array $groupes): array
+    private function ordreHemicycle(array $groupes): array
     {
         $rang = array_flip(self::ORDRE_HEMICYCLE);
         $inconnu = count($rang);
         usort($groupes, static fn (array $a, array $b) => ($rang[$a['libelle_abrev']] ?? $inconnu) <=> ($rang[$b['libelle_abrev']] ?? $inconnu));
 
-        $total = max(1, array_sum(array_column($groupes, 'effectif')));
-        $angle = 0.0;
-
-        foreach ($groupes as &$groupe) {
-            $ouverture = (int) $groupe['effectif'] / $total * M_PI;
-            $groupe['path'] = $this->arc($angle, $angle + $ouverture);
-            $angle += $ouverture;
-        }
-
         return $groupes;
     }
 
     /**
-     * Tracé d'un secteur d'anneau sur un demi-cercle de rayon 100, centré en
-     * (100, 100), l'angle 0 pointant vers la gauche de l'hémicycle.
+     * Les trois derniers articles publiés du blog, pour le bloc « Nos analyses
+     * et décryptages » — mêmes champs que les listes de BlogController.
+     *
+     * @return list<array<string, mixed>>
      */
-    private function arc(float $debut, float $fin): string
+    private function derniersArticles(): array
     {
-        $exterieur = 100.0;
-        $interieur = 55.0;
-
-        $point = static fn (float $rayon, float $angle): string => sprintf(
-            '%.2f %.2f',
-            100 - $rayon * cos($angle),
-            100 - $rayon * sin($angle),
+        $articles = $this->connection->fetchAllAssociative(
+            "SELECT a.id, a.titre, a.slug, a.image_nom, a.cree_le,
+                    c.nom AS rubrique_nom, c.slug AS rubrique_slug
+             FROM article a
+             JOIN categorie_article c ON c.id = a.categorie_id
+             WHERE a.etat = 'published'
+             ORDER BY a.cree_le DESC
+             LIMIT 3",
         );
 
-        return sprintf(
-            'M %s A %d %d 0 0 1 %s L %s A %d %d 0 0 0 %s Z',
-            $point($exterieur, $debut),
-            $exterieur,
-            $exterieur,
-            $point($exterieur, $fin),
-            $point($interieur, $fin),
-            $interieur,
-            $interieur,
-            $point($interieur, $debut),
-        );
+        foreach ($articles as &$article) {
+            // « 09 septembre 2025 » : jour sur deux chiffres, comme le site.
+            $dt = new \DateTimeImmutable((string) $article['cree_le']);
+            $article['date_fr'] = sprintf('%s %s %s', $dt->format('d'), DatanExtension::MOIS[(int) $dt->format('n')] ?? '', $dt->format('Y'));
+        }
+
+        return $articles;
     }
 
     /**
@@ -243,7 +253,7 @@ class HomeController extends AbstractController
     private function dernieresExplications(): array
     {
         return $this->connection->fetchAllAssociative(
-            'SELECT e.texte, d.firstname, d.lastname, d.slug, d.dpt_slug,
+            'SELECT e.texte, d.firstname, d.lastname, d.slug, d.dpt_slug, d.mp_id,
                     g.libelle_abrev AS groupe_abrev, g.legislature AS groupe_legislature,
                     ' . CouleurGroupe::SQL . ' AS groupe_couleur,
                     dcr.title AS decryptage_title, dcr.legislature, dcr.vote_numero,

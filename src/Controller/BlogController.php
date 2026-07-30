@@ -210,10 +210,10 @@ class BlogController extends AbstractController
         $mots = explode(' ', $texte);
 
         if (\count($mots) <= self::MOTS_EXTRAIT) {
-            return $texte;
+            return $this->entitesDecodees($texte);
         }
 
-        return implode(' ', \array_slice($mots, 0, self::MOTS_EXTRAIT)) . '…';
+        return $this->entitesDecodees(implode(' ', \array_slice($mots, 0, self::MOTS_EXTRAIT))) . '…';
     }
 
     /**
@@ -232,7 +232,30 @@ class BlogController extends AbstractController
         $coupe = mb_substr($texte, 0, self::CARACTERES_DESCRIPTION + 1);
         $dernierEspace = mb_strrpos($coupe, ' ');
 
-        return rtrim(mb_substr($coupe, 0, $dernierEspace === false ? self::CARACTERES_DESCRIPTION : $dernierEspace));
+        return $this->entitesDecodees(
+            rtrim(mb_substr($coupe, 0, $dernierEspace === false ? self::CARACTERES_DESCRIPTION : $dernierEspace)),
+        );
+    }
+
+    /**
+     * Rend leur caractère aux entités HTML du corps de l'article.
+     *
+     * `strip_tags()` ôte les balises mais laisse les entités : le corps saisi
+     * dans l'éditeur de la rédaction est truffé de `&nbsp;`, et un extrait passé
+     * tel quel à Twig ressort avec « &nbsp; » écrit en toutes lettres au milieu
+     * de la phrase — l'échappement automatique le change en `&amp;nbsp;`.
+     * L'origine, elle, échappe son extrait (`<?= … ?>` nu), si bien que le
+     * navigateur le rend en espace : c'est ce résultat-là qu'on reproduit, en
+     * décodant ici, l'échappement de Twig se chargeant ensuite de la sûreté.
+     *
+     * Le décodage vient APRÈS la troncature, jamais avant : couper sur le texte
+     * décodé déplacerait les frontières de mots (`&nbsp;Si` est un seul mot pour
+     * le `word_limiter` de l'origine, deux une fois décodé) et l'extrait ne
+     * s'arrêterait plus au même endroit que sur datan.fr.
+     */
+    private function entitesDecodees(string $texte): string
+    {
+        return html_entity_decode($texte, \ENT_QUOTES | \ENT_HTML5, 'UTF-8');
     }
 
     /** Adresse absolue d'un fichier public, pour les balises Open Graph. */

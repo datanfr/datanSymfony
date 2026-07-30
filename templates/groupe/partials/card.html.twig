@@ -21,8 +21,18 @@
       {% endif %}
     </h3>
     <span class="d-block libelle">{{ groupe.libelle_abrev }}</span>
+    {# `cat` est la mention que porte la carte dans l'historique d'un groupe :
+       la législature de cette incarnation. Elle remplace alors le pied
+       d'effectif par le bouton de renvoi, comme dans `card_home.php`. #}
+    {% if cat is defined and cat %}
+      <span class="d-block mt-2">{{ cat }}<sup>ème</sup> législature</span>
+    {% endif %}
   </div>
-  {% if actifs %}
+  {% if cat is defined and cat %}
+    <div class="mb-3">
+      <a class="btn btn-cat btn-primary stretched-link" href="{{ path('groupe_individual', {legislature: groupe.legislature, abrev: groupe.libelle_abrev|lower}) }}" role="button">Découvrez son activité</a>
+    </div>
+  {% elseif actifs %}
     <div class="card-footer d-flex justify-content-center align-items-center">
       <span>{{ groupe.effectif }} membres</span>
     </div>

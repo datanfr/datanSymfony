@@ -2,10 +2,12 @@
 
 namespace App\Controller\Admin;
 
+use App\Entity\Categorie;
 use App\Entity\Decryptage;
 use App\Entity\Utilisateur;
 use App\Enum\DecryptageState;
 use App\Form\DecryptageType;
+use App\Ia\CollecteurDecryptage;
 use App\Ia\GenerateurBrouillon;
 use App\Repository\DecryptageRepository;
 use App\Repository\ScrutinRepository;
@@ -31,11 +33,38 @@ use Symfony\Component\String\Slugger\AsciiSlugger;
 #[IsGranted(Utilisateur::ROLE_REDACTEUR)]
 class DecryptageController extends AbstractController
 {
+    /**
+     * Mots-clés → slug de catégorie, pour pré-sélectionner le classement
+     * d'après le titre du scrutin et du dossier. Table reprise du
+     * ScrutinController de PoliticAnalysis (detectCategory), ordonnée du plus
+     * spécifique au plus général pour limiter les faux positifs : « budget de
+     * la défense » doit tomber en Défense, pas en Économie. À la différence de
+     * l'origine, pas de repli « Économie » quand rien ne matche — une
+     * pré-sélection fausse coûte plus cher qu'un champ laissé au choix.
+     */
+    private const MOTS_CLES_CATEGORIES = [
+        'defense-armee' => ['défense', 'armée', 'militaire', 'soldat', 'gendarmerie', 'sécurité nationale'],
+        'agriculture' => ['agriculture', 'agricole', 'paysan', 'rural', 'élevage', 'forêt', 'agroalimentaire'],
+        'sports' => ['sport', 'olympique', 'paralympique'],
+        'sante-solidarite' => ['santé', 'hôpital', 'maladie', 'médicament', 'soins', 'assurance maladie'],
+        'justice' => ['justice', 'judiciaire', 'pénal', 'tribunal', 'magistrat', 'prison'],
+        'universites-recherche' => ['université', 'enseignement supérieur', 'recherche', 'innovation'],
+        'affaires-etrangeres' => ['diplomatique', 'affaires étrangères', 'accord international', 'traité'],
+        'europe' => ['union européenne', 'europe', 'communautaire', 'fonds européen'],
+        'institutions' => ['constitution', 'élection', 'collectivité', 'commune', 'territorial', 'sénat', 'parlement'],
+        'environnement' => ['environnement', 'écologie', 'énergie', 'climat', 'biodiversité', 'nucléaire', 'carbone'],
+        'economie' => ['budget', 'finances', 'fiscal', 'économie', 'tva', 'impôt', 'taxe', 'lfi', 'plfss'],
+        'affaires-sociales' => ['travail', 'emploi', 'retraite', 'handicap', 'famille', 'solidarités', 'logement'],
+        'education' => ['éducation', 'enseignement', 'école', 'collège', 'lycée', 'scolaire', 'jeunesse'],
+        'culture' => ['culture', 'patrimoine', 'audiovisuel', 'cinéma', 'musée', 'presse'],
+    ];
+
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
         private readonly DecryptageRepository $decryptages,
         private readonly ScrutinRepository $scrutins,
         private readonly GenerateurBrouillon $generateur,
+        private readonly CollecteurDecryptage $collecteur,
     ) {
     }
 
@@ -67,6 +96,15 @@ class DecryptageController extends AbstractController
         }
         if ($request->query->getInt('numero') > 0) {
             $decryptage->setVoteNumero($request->query->getInt('numero'));
+        }
+
+        // La matière de l'atelier (contexte du vote, exposé, débats, résultat)
+        // se collecte avant le formulaire : elle permet aussi de pré-cocher la
+        // catégorie d'après le titre — avant createForm(), sans quoi le champ
+        // ne verrait pas la suggestion.
+        $matiere = $this->matiereDuScrutin($decryptage->getLegislature(), $decryptage->getVoteNumero());
+        if ($matiere !== null && $decryptage->getCategorie() === null) {
+            $decryptage->setCategorie($this->categorieSuggeree($matiere));
         }
 
         $formulaire = $this->createForm(DecryptageType::class, $decryptage, [
@@ -119,9 +157,16 @@ class DecryptageController extends AbstractController
             }
         }
 
+        // Après une soumission refusée, législature et numéro peuvent différer
+        // de la query string : la matière suit ce que porte le formulaire.
+        if ($formulaire->isSubmitted()) {
+            $matiere = $this->matiereDuScrutin($decryptage->getLegislature(), $decryptage->getVoteNumero());
+        }
+
         return $this->render('admin/decryptage/form.html.twig', [
             'formulaire' => $formulaire,
             'decryptage' => null,
+            'matiere' => $matiere,
             'ia_actif' => $this->generateur->estActif(),
             'ia_modele' => $this->generateur->modele(),
         ]);
@@ -203,6 +248,7 @@ class DecryptageController extends AbstractController
         return $this->render('admin/decryptage/form.html.twig', [
             'formulaire' => $formulaire,
             'decryptage' => $decryptage,
+            'matiere' => $this->matiereDuScrutin($decryptage->getLegislature(), $decryptage->getVoteNumero()),
             'ia_actif' => $this->generateur->estActif(),
             'ia_modele' => $this->generateur->modele(),
         ]);
@@ -229,6 +275,47 @@ class DecryptageController extends AbstractController
         }
 
         return $this->render('admin/decryptage/supprimer.html.twig', ['decryptage' => $decryptage]);
+    }
+
+    /**
+     * La matière du scrutin pour l'atelier de décryptage. Null quand il n'y a
+     * rien à montrer : paramètres absents, scrutin inconnu — ou vote du
+     * Congrès, dont le numéro est noté négatif chez nous (la garde « > 0 »
+     * l'écarte, et le collecteur ne lit de toute façon que les uid VTANR :
+     * le compte rendu du Congrès n'est pas dans nos données).
+     *
+     * @return array<string, mixed>|null
+     */
+    private function matiereDuScrutin(?int $legislature, ?int $numero): ?array
+    {
+        if ($legislature === null || $numero === null || $legislature <= 0 || $numero <= 0) {
+            return null;
+        }
+
+        return $this->collecteur->collecter($legislature, $numero);
+    }
+
+    /**
+     * La catégorie suggérée par les mots-clés du titre (scrutin + dossier).
+     * Null quand rien ne matche : le champ reste au choix de la rédaction.
+     *
+     * @param array<string, mixed> $matiere
+     */
+    private function categorieSuggeree(array $matiere): ?Categorie
+    {
+        $texte = mb_strtolower(
+            ($matiere['scrutin']['titre'] ?? '') . ' ' . ($matiere['dossier']['titre'] ?? ''),
+        );
+
+        foreach (self::MOTS_CLES_CATEGORIES as $slug => $motsCles) {
+            foreach ($motsCles as $motCle) {
+                if (str_contains($texte, $motCle)) {
+                    return $this->entityManager->getRepository(Categorie::class)->findOneBy(['slug' => $slug]);
+                }
+            }
+        }
+
+        return null;
     }
 
     /**

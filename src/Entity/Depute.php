@@ -124,6 +124,18 @@ class Depute
     #[Groups(['depute:read', 'depute:write'])]
     private ?int $age = null;
 
+    /**
+     * État civil publié par l'Assemblée (`etatCivil.infoNaissance` des acteurs) :
+     * la bio de la fiche ouvre sur « né le 25 septembre 1989 à Arras ».
+     */
+    #[ORM\Column(type: Types::DATE_MUTABLE, nullable: true)]
+    #[Groups(['depute:read'])]
+    private ?\DateTimeInterface $dateNaissance = null;
+
+    #[ORM\Column(length: 255, nullable: true)]
+    #[Groups(['depute:read'])]
+    private ?string $villeNaissance = null;
+
     #[ORM\Column(type: Types::DATETIME_MUTABLE, nullable: true)]
     #[Groups(['depute:read', 'depute:write'])]
     private ?\DateTimeInterface $dateFin = null;
@@ -337,6 +349,30 @@ class Depute
     public function setCivilite(?string $civilite): static
     {
         $this->civilite = $civilite;
+
+        return $this;
+    }
+
+    public function getDateNaissance(): ?\DateTimeInterface
+    {
+        return $this->dateNaissance;
+    }
+
+    public function setDateNaissance(?\DateTimeInterface $dateNaissance): static
+    {
+        $this->dateNaissance = $dateNaissance;
+
+        return $this;
+    }
+
+    public function getVilleNaissance(): ?string
+    {
+        return $this->villeNaissance;
+    }
+
+    public function setVilleNaissance(?string $villeNaissance): static
+    {
+        $this->villeNaissance = $villeNaissance;
 
         return $this;
     }

@@ -4,7 +4,14 @@
 
    Le député est lu sur `app.user.depute` plutôt que sur une variable passée à
    chaque rendu : la barre latérale est identique sur toutes les pages, y
-   compris celles qui ne chargent pas la fiche. #}
+   compris celles qui ne chargent pas la fiche.
+
+   Divergence de vocabulaire assumée, et la seule : l'origine dit « dashboard »
+   partout (lien de barre, titre « Bienvenue sur votre dashboard »), nous disons
+   « tableau de bord ». Espace privé, ni indexé ni cité par un lien du site
+   public — la règle de parité d'adresse et d'affichage ne s'y applique pas, et
+   « Français partout » de `CLAUDE.md` tranche. À ne pas « ré-aligner » sur le
+   site par méprise. #}
 {% extends 'admin/base.html.twig' %}
 
 {% set depute = app.user.depute %}

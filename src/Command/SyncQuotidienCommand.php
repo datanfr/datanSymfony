@@ -34,6 +34,10 @@ class SyncQuotidienCommand extends Command
     private const ETAPES = [
         ['app:tricoteuses:sync', [], 'Moisson des dépôts'],
         ['app:import:acteurs', [], 'Organes, députés, mandats et fonctions'],
+        // Après les acteurs, dont elle a besoin pour rattacher chaque mandat à sa
+        // fiche : les délégations du Bureau (« Postes Assemblée »), qui se créent
+        // et s'éteignent en cours de législature.
+        ['app:import:organes', [], 'Organes hors table dédiée (délégations du Bureau)'],
         // Juste après les acteurs : les profils se lisent dans les mêmes
         // fichiers, et c'est pour qu'ils se rafraîchissent qu'ils ont quitté la
         // base gelée dont ils venaient.

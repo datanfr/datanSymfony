@@ -53,6 +53,15 @@ class CalculClassementsCommand extends Command
     private const EXPRIMES = "('pour', 'contre', 'abstention')";
 
     /**
+     * Position d'un député qui n'avait pas le droit de prendre part au scrutin
+     * — présidence de séance, membre du Gouvernement. Ce n'est pas une absence.
+     */
+    private const NON_VOTANT = 'nonVotant';
+
+    /** Borne haute conventionnelle d'un mandat encore ouvert. */
+    private const SANS_FIN = '9999-12-31';
+
+    /**
      * Les non-inscrits ne forment pas un groupe : l'application d'origine les
      * écarte des classements qui décrivent une composition (âge, féminisation,
      * représentativité sociale), mais les garde dans ceux qui décrivent un
@@ -163,26 +172,38 @@ class CalculClassementsCommand extends Command
      * Taux de participation des députés, aux scrutins solennels puis à tous les
      * scrutins de la législature.
      *
-     * Le dénominateur compte TOUS les scrutins tenus pendant la période
-     * d'activité du député, et non les seuls scrutins où il a une ligne de
-     * vote : une absence complète ne laisse aucune trace dans `vote`, et
-     * l'ignorer donnerait 100 % à un député pourtant absent. Faute d'historique
-     * des dates de mandat, la période est bornée par son premier et son dernier
-     * vote — c'est la définition déjà portée sur la page d'un député.
+     * Deux règles, toutes deux reprises de `daily.php:2306-2318`, et toutes deux
+     * indispensables au chiffre affiché :
+     *
+     * 1. Le dénominateur compte TOUS les scrutins tenus pendant que le député
+     *    siégeait, et non les seuls scrutins où il a une ligne de vote : une
+     *    absence complète ne laisse aucune trace dans `vote`, et l'ignorer
+     *    donnerait 100 % à un député pourtant absent. La période est celle du
+     *    **mandat** (`mandat.date_prise_fonction` → `date_fin`), et non le
+     *    premier et le dernier vote connus : un suppléant entré en cours de
+     *    législature prend ses fonctions bien avant son premier vote, et le
+     *    borner à ses votes le crédite d'une assiduité qu'il n'a pas eue.
+     *
+     * 2. Un scrutin où le député est **non-votant** sort du dénominateur au lieu
+     *    d'y compter comme une absence. Ce n'en est pas une : présider la séance
+     *    ou appartenir au Gouvernement interdit de prendre part au vote. Sans
+     *    cette règle la présidente de l'Assemblée, non-votante sur 49 des 72
+     *    scrutins solennels, sortait 577e à 32 % quand le site la donne à 100 %,
+     *    et tout le bas du classement était décalé d'autant.
+     *
+     * L'application d'origine double la seconde règle d'une exception nommée —
+     * `mpId = "PA721908" AND dateScrutin > "2022-06-22"`, soit Yaël Braun-Pivet
+     * depuis son élection à la présidence. Elle n'est pas reprise : c'est un
+     * identifiant en dur, qui vieillit le jour où l'Assemblée change de
+     * président, et notre source n'en a pas besoin. Les scrutins où la
+     * présidente ne vote pas nous arrivent en `nonVotant` — 72 lignes pour 72
+     * solennels, aucun trou —, là où la base d'origine n'avait pour eux aucune
+     * ligne du tout et devait donc nommer l'intéressée. Le cas général couvre le
+     * cas particulier ; si la source cessait de publier ces lignes, le symptôme
+     * serait un taux qui s'effondre, pas un silence.
      *
      * Un seul balayage de `vote` sert les deux classements ; les dénominateurs
      * se déduisent ensuite des dates de scrutin, tenues en mémoire.
-     *
-     * Les taux obtenus ne recouvrent pas exactement ceux de datan.fr, et il ne
-     * faut pas chercher à les y ramener : sur les 574 députés classés de part et
-     * d'autre, l'écart moyen est de −1,8 point, 81 taux coïncident à un demi-point
-     * près et 19 s'écartent de plus de 20 points. Les deux dénominateurs ne
-     * partent pas de la même période d'activité — l'Assemblée date les mandats
-     * autrement que `daily.php`, qui les recompose. Les extrêmes sont d'ailleurs
-     * du bon côté : là où la production affiche 100 % à des députés entrés en
-     * cours de législature et n'ayant voté que quatre à dix-neuf fois, le
-     * dénominateur retenu ici rapporte leurs votes à tous les solennels tenus
-     * pendant qu'ils siégeaient.
      *
      * @return array<string, list<array{id: int, score: float, numerateur: int, denominateur: int, tri: array<int|string>}>>
      */
@@ -193,12 +214,16 @@ class CalculClassementsCommand extends Command
             TypeClassement::DeputesParticipationTous->value => $this->datesScrutins($legislature, null),
         ];
 
-        $activite = $this->connection->fetchAllAssociative(
+        $comptes = $this->connection->fetchAllAssociative(
             'SELECT v.depute_id,
-                    MIN(v.scrutin_date) AS debut,
-                    MAX(v.scrutin_date) AS fin,
-                    SUM(s.code_type_vote = :solennel AND v.position IN ' . self::EXPRIMES . ') AS exprimes_solennels,
-                    SUM(s.code_type_vote <> :motion AND v.position IN ' . self::EXPRIMES . ') AS exprimes_tous
+                    SUM(s.code_type_vote = :solennel
+                        AND v.position IN ' . self::EXPRIMES . ') AS exprimes_solennels,
+                    SUM(s.code_type_vote = :solennel
+                        AND v.position = :non_votant) AS retires_solennels,
+                    SUM((s.code_type_vote IS NULL OR s.code_type_vote <> :motion)
+                        AND v.position IN ' . self::EXPRIMES . ') AS exprimes_tous,
+                    SUM((s.code_type_vote IS NULL OR s.code_type_vote <> :motion)
+                        AND v.position = :non_votant) AS retires_tous
              FROM vote v
              JOIN scrutin s ON s.id = v.scrutin_id
              WHERE v.vote_type = :type AND s.legislature = :legislature
@@ -206,39 +231,47 @@ class CalculClassementsCommand extends Command
             [
                 'solennel' => self::SOLENNEL,
                 'motion' => self::MOTION_CENSURE,
+                'non_votant' => self::NON_VOTANT,
                 'type' => self::OFFICIEL,
                 'legislature' => $legislature,
             ],
         );
 
+        $parDepute = [];
+        foreach ($comptes as $ligne) {
+            $parDepute[(int) $ligne['depute_id']] = $ligne;
+        }
+
         $deputes = $this->deputesEnExercice($legislature);
+        $fenetres = $this->fenetresDeSession($legislature, $this->bornesDeVote($legislature));
         $classements = [];
 
         foreach ([
-            TypeClassement::DeputesParticipation->value => 'exprimes_solennels',
-            TypeClassement::DeputesParticipationTous->value => 'exprimes_tous',
-        ] as $type => $colonne) {
+            TypeClassement::DeputesParticipation->value => 'solennels',
+            TypeClassement::DeputesParticipationTous->value => 'tous',
+        ] as $type => $suffixe) {
             $classement = [];
 
-            foreach ($activite as $ligne) {
-                $deputeId = (int) $ligne['depute_id'];
-                if (!isset($deputes[$deputeId])) {
+            // On part des députés, non des votants : celui qui n'a jamais voté
+            // n'a aucune ligne dans `vote` et doit tout de même être classé — à
+            // zéro, ce qui est précisément l'information recherchée.
+            foreach ($deputes as $deputeId => $nom) {
+                $tenus = $this->compteFenetres($dates[$type], $fenetres[$deputeId] ?? []);
+                $ligne = $parDepute[$deputeId] ?? null;
+
+                $exprimes = (int) ($ligne['exprimes_' . $suffixe] ?? 0);
+                $denominateur = $tenus - (int) ($ligne['retires_' . $suffixe] ?? 0);
+
+                if ($denominateur <= 0) {
                     continue;
                 }
-
-                $tenus = $this->comptePeriode($dates[$type], $ligne['debut'], $ligne['fin']);
-                if ($tenus === 0) {
-                    continue;
-                }
-
-                $exprimes = (int) $ligne[$colonne];
 
                 $classement[] = [
                     'id' => $deputeId,
-                    'score' => $exprimes / $tenus,
+                    'score' => $exprimes / $denominateur,
                     'numerateur' => $exprimes,
-                    'denominateur' => $tenus,
-                    'tri' => [-$exprimes, $deputes[$deputeId]],
+                    'denominateur' => $denominateur,
+                    'tri' => [-$denominateur, $nom],
                 ];
             }
 
@@ -476,6 +509,25 @@ class CalculClassementsCommand extends Command
      * l'INSEE. Les députés dont la profession n'est pas déclarée sortent du
      * calcul faute de pouvoir être rangés.
      *
+     * Les deux parts sont arrondies au millième **avant** d'être soustraites,
+     * comme les deux `round(…, 3)` de `daily.php:1091-1109`. L'arrondi n'est pas
+     * un détail de présentation : il entre dans la somme, et c'est lui qui fait
+     * tomber GDR sur le 0,387 du site plutôt que sur 0,386.
+     *
+     * Nos scores restent au-dessus de ceux de datan.fr d'un à quatre centièmes,
+     * et c'est **voulu**. L'application d'origine apparie la profession du
+     * député à sa table `famsocpro` par égalité stricte ; or l'open data écrit
+     * « Artisans, commerçants, chefs d'entreprises » quand la table de référence
+     * dit « Artisans, commerçants et chefs d'entreprise ». Les 41 artisans de la
+     * 17e n'y trouvent donc aucune correspondance et disparaissent du calcul —
+     * ni au numérateur, ni au dénominateur —, alors même que le tableau croisé
+     * de la page, lui, les affiche sous leur graphie brute. Retirer nos artisans
+     * du calcul reproduit le site au millième près (LFI 0,432, RN 0,403, GDR
+     * 0,387, SOC et DEM 0,239, ECOS 0,205, UDDPLR 0,114) : la démonstration est
+     * faite, l'écart n'a pas d'autre cause. C'est la coquille de casse de
+     * `CLAUDE.md` sous un autre jour, et on ne la reproduit pas — 43 députés
+     * classés valent mieux qu'un score comparable au chiffre près.
+     *
      * @return list<array{id: int, score: float, numerateur: null, denominateur: int, tri: array<int|string>}>
      */
     private function origineSocialeGroupes(int $legislature): array
@@ -505,7 +557,7 @@ class CalculClassementsCommand extends Command
             $ecart = 0.0;
 
             foreach ($population as $famille => $part) {
-                $ecart += abs($part / 100 - ($effectifs[$famille] ?? 0) / $classes);
+                $ecart += abs(round($part / 100, 3) - round(($effectifs[$famille] ?? 0) / $classes, 3));
             }
 
             $agreges[] = ['id' => $groupeId, 'rose' => 1 - 0.5 * $ecart, 'classes' => $classes];
@@ -561,6 +613,15 @@ class CalculClassementsCommand extends Command
      * table pour ce type et cette législature. Deux scores égaux partagent le
      * même rang et décalent le suivant d'autant, comme le `RANK()` d'origine.
      *
+     * L'égalité se juge sur le score **tel qu'il sera stocké**, à trois
+     * décimales, et non sur le flottant qui l'a produit. C'est la précision de
+     * `class_groups.value` (un `decimal(6,3)`) sur lequel porte le `RANK()` de
+     * l'application d'origine, et c'est elle qui fait les ex æquo du site :
+     * UDDPLR et GDR partagent le rang 3 de la cohésion à 0,964, EPR et DEM le
+     * rang 6 de la participation à 0,899. Comparer les flottants bruts les
+     * sépare sur une décimale que personne ne voit, et le classement affiche
+     * 3 puis 4 là où le site affiche 3 et 3.
+     *
      * @param list<array{id: int, score: float, numerateur: int|null, denominateur: int|null, tri: array<int|string>}> $classement
      */
     private function remplace(TypeClassement $type, int $legislature, array $classement): void
@@ -585,9 +646,11 @@ class CalculClassementsCommand extends Command
         $batch = [];
 
         foreach ($classement as $position => $ligne) {
-            if ($precedent === null || abs($ligne['score'] - $precedent) > 1e-9) {
+            $stocke = round($ligne['score'], 3);
+
+            if ($precedent === null || $stocke !== $precedent) {
                 $rang = $position + 1;
-                $precedent = $ligne['score'];
+                $precedent = $stocke;
             }
 
             $batch[] = [
@@ -595,7 +658,7 @@ class CalculClassementsCommand extends Command
                 $legislature,
                 $rang,
                 $ligne['id'],
-                round($ligne['score'], 3),
+                $stocke,
                 $ligne['numerateur'],
                 $ligne['denominateur'],
                 $calculeLe,
@@ -632,13 +695,18 @@ class CalculClassementsCommand extends Command
      * restreintes à un type de scrutin. Les motions de censure sont écartées
      * quand on regarde l'ensemble des scrutins.
      *
+     * `DATE()` n'est pas cosmétique : `scrutin.date_scrutin` est un DATETIME et
+     * les bornes de mandat sont des DATE. Comparées telles quelles, en chaînes,
+     * « 2025-02-13 15:00:00 » passe pour postérieur à « 2025-02-13 » — et le
+     * scrutin du dernier jour de mandat sortait de la fenêtre.
+     *
      * @return list<string>
      */
     private function datesScrutins(int $legislature, ?string $codeTypeVote): array
     {
         if ($codeTypeVote !== null) {
             return $this->connection->fetchFirstColumn(
-                'SELECT date_scrutin FROM scrutin
+                'SELECT DATE(date_scrutin) FROM scrutin
                  WHERE legislature = :legislature AND code_type_vote = :code
                  ORDER BY date_scrutin',
                 ['legislature' => $legislature, 'code' => $codeTypeVote],
@@ -646,7 +714,7 @@ class CalculClassementsCommand extends Command
         }
 
         return $this->connection->fetchFirstColumn(
-            'SELECT date_scrutin FROM scrutin
+            'SELECT DATE(date_scrutin) FROM scrutin
              WHERE legislature = :legislature
                AND (code_type_vote IS NULL OR code_type_vote <> :motion)
              ORDER BY date_scrutin',
@@ -655,15 +723,200 @@ class CalculClassementsCommand extends Command
     }
 
     /**
-     * Nombre de scrutins tenus entre deux dates incluses. Les dates étant
-     * triées, deux recherches dichotomiques suffisent — ce compte est repris
-     * pour chacun des 577 députés sur plusieurs milliers de scrutins.
+     * Périodes pendant lesquelles chaque député a effectivement siégé, une liste
+     * d'intervalles par député.
      *
-     * @param list<string> $dates
+     * Elles se lisent dans `fonction_groupe`, et **non dans `mandat`**, alors
+     * même que `daily.php` interroge son `mandat_principal` : la table de
+     * l'Assemblée ne garde qu'un mandat par siège et **remplace** le précédent
+     * au lieu de l'archiver, quand le legacy accumule le sien moisson après
+     * moisson. Les interruptions y ont donc disparu — Charlotte
+     * Parmentier-Lecocq n'a plus qu'un mandat ouvert le 27 mars 2026, et
+     * Patrick Hetzel un seul couvrant toute la législature, alors que l'un et
+     * l'autre ont quitté l'hémicycle pour le Gouvernement entre-temps. Vingt-six
+     * députés de la 17e ont ainsi des votes **hors** du mandat qu'on leur
+     * déclare, et six sortaient à 179 %, 113 %, 107 % de participation.
+     *
+     * Le rattachement à un groupe, lui, se referme et se rouvre à chaque
+     * aller-retour : Hetzel est DR jusqu'au 21 octobre 2024, rien pendant sa
+     * charge ministérielle, DR à nouveau depuis le 25 janvier 2025. C'est la
+     * seule trace fidèle des périodes de présence dont nous disposions, et elle
+     * rend au site ses quatre scrutins d'écart — 68 solennels sur 68, non 68
+     * sur 72.
+     *
+     * Restent deux garde-fous : `mandat` prend le relais pour qui n'a aucun
+     * rattachement, et les bornes observées des votes élargissent la fenêtre si
+     * elles la débordent encore. Un vote vaut preuve de présence — il ne peut
+     * pas tomber hors de la fenêtre qui le compte.
+     *
+     * @param array<int, array{0: string, 1: string}> $bornes premier et dernier vote connus
+     *
+     * @return array<int, list<array{0: string, 1: string}>>
      */
-    private function comptePeriode(array $dates, string $debut, string $fin): int
+    private function fenetresDeSession(int $legislature, array $bornes): array
     {
-        return $this->borne($dates, $fin, true) - $this->borne($dates, $debut, false);
+        $lignes = $this->connection->fetchAllAssociative(
+            // Sans filtre sur `nomin_principale`, contrairement à tout ce qui
+            // désigne LE groupe d'un député : ici on ne choisit pas un
+            // rattachement, on réunit des présences, et n'importe lequel en est
+            // la preuve. Chez les présidents de groupe, la ligne « Membre » et
+            // la ligne « Président » ne portent pas le même drapeau — Stéphane
+            // Peu et Christophe Naegelen n'avaient plus, filtrés, que leur
+            // parenthèse de non-inscrit de juillet 2024, et sortaient à 108 % et
+            // 171 % de participation.
+            'SELECT fg.depute_id, fg.date_debut AS debut, fg.date_fin AS fin
+             FROM fonction_groupe fg
+             JOIN groupe g ON g.id = fg.groupe_id AND g.legislature = :legislature
+             WHERE fg.date_debut IS NOT NULL
+             ORDER BY fg.depute_id, fg.date_debut',
+            ['legislature' => $legislature],
+        );
+
+        $brutes = [];
+
+        foreach ($lignes as $ligne) {
+            $brutes[(int) $ligne['depute_id']][] = [$ligne['debut'], $ligne['fin'] ?? self::SANS_FIN];
+        }
+
+        // Un député sans aucun rattachement de groupe garde son mandat pour
+        // seule trace : c'est mieux que rien, et cela ne concerne personne à la
+        // 17e — la garde existe pour les législatures où `fonction_groupe` est
+        // moins bien renseignée.
+        $mandats = $this->connection->fetchAllAssociative(
+            'SELECT depute_id, date_prise_fonction AS debut, date_fin AS fin
+             FROM mandat
+             WHERE legislature = :legislature AND date_prise_fonction IS NOT NULL
+             ORDER BY depute_id, date_prise_fonction',
+            ['legislature' => $legislature],
+        );
+
+        foreach ($mandats as $ligne) {
+            $deputeId = (int) $ligne['depute_id'];
+
+            if (!isset($brutes[$deputeId])) {
+                $brutes[$deputeId][] = [$ligne['debut'], $ligne['fin'] ?? self::SANS_FIN];
+            }
+        }
+
+        $fenetres = [];
+
+        foreach ($brutes as $deputeId => $intervalles) {
+            $fenetres[$deputeId] = $this->fusionne($intervalles);
+        }
+
+        foreach ($bornes as $deputeId => [$premier, $dernier]) {
+            if (!isset($fenetres[$deputeId])) {
+                $fenetres[$deputeId] = [[$premier, $dernier]];
+
+                continue;
+            }
+
+            // Seules les bornes extérieures s'écartent : un vote tombé dans
+            // l'interruption entre deux rattachements ne rouvre pas la
+            // parenthèse — c'est justement elle qu'on cherche à préserver.
+            $derniere = \count($fenetres[$deputeId]) - 1;
+            $fenetres[$deputeId][0][0] = min($fenetres[$deputeId][0][0], $premier);
+            $fenetres[$deputeId][$derniere][1] = max($fenetres[$deputeId][$derniere][1], $dernier);
+        }
+
+        return $fenetres;
+    }
+
+    /**
+     * Réunit les intervalles qui se chevauchent ou se touchent. Les
+     * rattachements se succèdent au jour le jour — non-inscrit du 8 au 18
+     * juillet, puis membre du groupe à partir du 19 — et il ne faut ni compter
+     * deux fois un scrutin à la charnière, ni y voir une interruption.
+     *
+     * @param list<array{0: string, 1: string}> $intervalles déjà triés par date de début
+     *
+     * @return list<array{0: string, 1: string}>
+     */
+    private function fusionne(array $intervalles): array
+    {
+        $fusionnes = [];
+
+        foreach ($intervalles as [$debut, $fin]) {
+            $precedent = \count($fusionnes) - 1;
+
+            // Un jour d'écart suffit à rattacher : deux mandats de groupe
+            // consécutifs ne laissent pas de trou, une charge ministérielle si.
+            if ($precedent >= 0 && $debut <= $this->lendemain($fusionnes[$precedent][1])) {
+                $fusionnes[$precedent][1] = max($fusionnes[$precedent][1], $fin);
+
+                continue;
+            }
+
+            $fusionnes[] = [$debut, $fin];
+        }
+
+        return $fusionnes;
+    }
+
+    /**
+     * Le jour suivant une date, la borne conventionnelle mise à part.
+     *
+     * `strtotime('9999-12-31 +1 day')` déborde et rend `false`, que `date()`
+     * traduit en 1970 : la comparaison s'inversait alors et deux rattachements
+     * pourtant contigus restaient séparés. Stéphane Lenormand, membre et
+     * président de LIOT le même jour, se voyait ainsi compter deux fois chaque
+     * scrutin — 64 votes sur 144 solennels, quand la législature n'en compte
+     * que 72.
+     */
+    private function lendemain(string $date): string
+    {
+        return $date === self::SANS_FIN
+            ? self::SANS_FIN
+            : (new \DateTimeImmutable($date))->modify('+1 day')->format('Y-m-d');
+    }
+
+    /**
+     * Premier et dernier scrutin où chaque député apparaît, non-votants compris :
+     * figurer dans la ventilation d'un scrutin, fût-ce comme non-votant, prouve
+     * qu'on siégeait ce jour-là.
+     *
+     * @return array<int, array{0: string, 1: string}>
+     */
+    private function bornesDeVote(int $legislature): array
+    {
+        $lignes = $this->connection->fetchAllAssociative(
+            'SELECT v.depute_id,
+                    MIN(DATE(v.scrutin_date)) AS premier,
+                    MAX(DATE(v.scrutin_date)) AS dernier
+             FROM vote v
+             JOIN scrutin s ON s.id = v.scrutin_id
+             WHERE s.legislature = :legislature
+             GROUP BY v.depute_id',
+            ['legislature' => $legislature],
+        );
+
+        $bornes = [];
+
+        foreach ($lignes as $ligne) {
+            $bornes[(int) $ligne['depute_id']] = [$ligne['premier'], $ligne['dernier']];
+        }
+
+        return $bornes;
+    }
+
+    /**
+     * Nombre de scrutins tenus pendant qu'un député siégeait. Les intervalles
+     * d'un même député sont disjoints — un mandat se referme avant que le
+     * suivant s'ouvre —, leurs comptes s'additionnent donc sans risque de
+     * double compte.
+     *
+     * @param list<string>                        $dates
+     * @param list<array{0: string, 1: string}>   $fenetres
+     */
+    private function compteFenetres(array $dates, array $fenetres): int
+    {
+        $total = 0;
+
+        foreach ($fenetres as [$debut, $fin]) {
+            $total += $this->borne($dates, $fin, true) - $this->borne($dates, $debut, false);
+        }
+
+        return $total;
     }
 
     /**

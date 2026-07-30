@@ -1,8 +1,11 @@
 {# Les deux bouts d'un classement de groupes, en vis-à-vis sur la page
    d'accueil des statistiques. Porté de
-   application/views/classements/partials/groups_index.php. #}
+   application/views/classements/partials/groups_index.php.
+
+   Le contrôleur a déjà rangé les deux cartes dans l'ordre d'affichage : selon
+   le bloc, la gauche revient au premier ou au dernier du classement. #}
 <div class="ranking-graph-group mt-4 py-4 row row-grid">
-  {% for bout in [duo.premier, duo.dernier] %}
+  {% for bout in [duo.gauche, duo.droite] %}
     <div class="col-sm-6 d-flex flex-column align-items-center">
       <div class="title text-center mb-4">{{ bout.titre }}</div>
       <a href="{{ path('groupe_individual', {legislature: bout.groupe.legislature, abrev: bout.groupe.libelle_abrev|lower}) }}">

@@ -13,13 +13,28 @@ use Twig\TwigFunction;
  * Adresse de la photographie d'un député, avec repli sur le visage générique du
  * site quand elle manque.
  *
- * Les photos sont publiées par {@see ImportPhotosCommand} sous
- * `public/assets/imgs/deputes/`, nommées par la partie numérique du `mp_id`.
+ * **Trois jeux de photos, et l'ordre entre eux compte.** Datan ne sert pas le
+ * portrait de l'Assemblée : il le détoure, et — depuis la 17e législature — le
+ * recadre au carré en 240 × 240 (`card_home.php:7`). Ces fichiers sont produits
+ * à la main, hors open data, et vivent sur le serveur du site :
+ *
+ * - `assets/imgs/deputes_original/depute_<id>.png` — carré, 17e et au-delà ;
+ * - `assets/imgs/deputes_nobg/depute_<id>.png` — détouré 150 × 192, avant ;
+ * - `assets/imgs/deputes/<id>.jpg` — le portrait brut de l'Assemblée, publié
+ *   par {@see ImportPhotosCommand} depuis le dépôt des Tricoteuses.
+ *
+ * Le JPG n'est qu'un **repli** : le cadre carré de la 17e y rogne les épaules
+ * et zoome sur le visage, ce qui se voit sur chaque carte. Les deux jeux
+ * détourés ne sont pas dans ce dépôt (ils pèsent une centaine de mégaoctets et
+ * ne se régénèrent pas) : ils se recopient depuis le serveur au déploiement.
+ * Tant qu'ils manquent, le site reste lisible — il n'est simplement pas encore
+ * identique à datan.fr sur ce point. Voir `TODO.md`.
+ *
  * L'existence du fichier fait foi : rien en base ne dit qui a une photo, et
  * c'est voulu — une colonne le prétendrait sans jamais être vérifiée.
  *
- * Le dossier n'est lu qu'une fois par requête, à la première photo demandée.
- * Une page de liste appelle la fonction 577 fois : autant d'appels à
+ * Chaque dossier n'est lu qu'une fois par requête, à la première photo
+ * demandée. Une page de liste appelle la fonction 577 fois : autant d'appels à
  * `is_file()` coûteraient 577 accès disque là où un seul suffit.
  */
 class PhotoExtension extends AbstractExtension
@@ -27,8 +42,17 @@ class PhotoExtension extends AbstractExtension
     /** Le visage générique qu'affichaient jusqu'ici toutes les fiches. */
     private const PLACEHOLDER = 'assets/imgs/placeholder/placeholder-face.png';
 
-    /** @var array<string, true>|null identifiants dont la photo est publiée */
-    private ?array $publiees = null;
+    /** Portraits détourés et recadrés carré, servis à partir de la 17e législature. */
+    private const CARRES = 'assets/imgs/deputes_original';
+
+    /** Portraits détourés au format 150 × 192, servis avant la 17e. */
+    private const DETOURES = 'assets/imgs/deputes_nobg';
+
+    /** La 17e a inauguré le cadre carré ; avant, le portrait reste en hauteur. */
+    private const PREMIERE_LEGISLATURE_CARREE = 17;
+
+    /** @var array<string, array<string, true>> index par dossier, rempli à la demande */
+    private array $index = [];
 
     public function __construct(
         private readonly Packages $assets,
@@ -49,13 +73,7 @@ class PhotoExtension extends AbstractExtension
      */
     public function photoDepute(array|Depute|string|null $depute): string
     {
-        $identifiant = $this->identifiant($depute);
-
-        if ($identifiant === null || !isset($this->index()[$identifiant])) {
-            return $this->assets->getUrl(self::PLACEHOLDER);
-        }
-
-        return $this->assets->getUrl(ImportPhotosCommand::DOSSIER_PUBLIC . '/' . $identifiant . '.jpg');
+        return $this->assets->getUrl($this->fichier($depute) ?? self::PLACEHOLDER);
     }
 
     /**
@@ -67,9 +85,43 @@ class PhotoExtension extends AbstractExtension
      */
     public function aUnePhoto(array|Depute|string|null $depute): bool
     {
+        return $this->fichier($depute) !== null;
+    }
+
+    /**
+     * Le meilleur fichier disponible pour ce député, ou null s'il n'en a aucun.
+     *
+     * L'ordre suit celui du legacy — carré puis détouré selon la législature —
+     * mais l'autre jeu détouré est tenté avant de tomber sur le portrait brut :
+     * un député réélu à la 17e a souvent gardé son ancienne photo détourée, et
+     * elle vaut mieux qu'un portrait d'Assemblée rogné.
+     *
+     * @param array<string, mixed>|Depute|string|null $depute
+     */
+    private function fichier(array|Depute|string|null $depute): ?string
+    {
         $identifiant = $this->identifiant($depute);
 
-        return $identifiant !== null && isset($this->index()[$identifiant]);
+        if ($identifiant === null) {
+            return null;
+        }
+
+        $carree = !\is_array($depute)
+            || (int) ($depute['legislature_last'] ?? self::PREMIERE_LEGISLATURE_CARREE) >= self::PREMIERE_LEGISLATURE_CARREE;
+
+        $candidats = $carree
+            ? [[self::CARRES, 'depute_', '.png'], [self::DETOURES, 'depute_', '.png']]
+            : [[self::DETOURES, 'depute_', '.png'], [self::CARRES, 'depute_', '.png']];
+
+        $candidats[] = [ImportPhotosCommand::DOSSIER_PUBLIC, '', '.jpg'];
+
+        foreach ($candidats as [$dossier, $prefixe, $extension]) {
+            if (isset($this->index($dossier, $extension)[$prefixe . $identifiant])) {
+                return $dossier . '/' . $prefixe . $identifiant . $extension;
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -95,29 +147,32 @@ class PhotoExtension extends AbstractExtension
     }
 
     /**
+     * Les noms de base (extension ôtée) présents dans un dossier de photos.
+     *
      * @return array<string, true>
      */
-    private function index(): array
+    private function index(string $dossier, string $extension): array
     {
-        if ($this->publiees !== null) {
-            return $this->publiees;
+        if (isset($this->index[$dossier])) {
+            return $this->index[$dossier];
         }
 
-        $dossier = $this->racineProjet . '/public/' . ImportPhotosCommand::DOSSIER_PUBLIC;
-        $this->publiees = [];
+        $chemin = $this->racineProjet . '/public/' . $dossier;
+        $this->index[$dossier] = [];
 
-        // Tant que l'import n'a pas tourné, le dossier n'existe pas : toutes les
-        // fiches gardent le placeholder, sans erreur.
-        if (!is_dir($dossier)) {
-            return $this->publiees;
+        // Tant que l'import n'a pas tourné — ou que les photos détourées n'ont
+        // pas été recopiées depuis le serveur — le dossier n'existe pas : le
+        // candidat suivant prend la main, sans erreur.
+        if (!is_dir($chemin)) {
+            return $this->index[$dossier];
         }
 
-        foreach (scandir($dossier) ?: [] as $fichier) {
-            if (str_ends_with($fichier, '.jpg')) {
-                $this->publiees[basename($fichier, '.jpg')] = true;
+        foreach (scandir($chemin) ?: [] as $fichier) {
+            if (str_ends_with($fichier, $extension)) {
+                $this->index[$dossier][basename($fichier, $extension)] = true;
             }
         }
 
-        return $this->publiees;
+        return $this->index[$dossier];
     }
 }

@@ -52,6 +52,16 @@ class Mandat
     #[Groups(['mandat:read', 'mandat:write', 'depute:read'])]
     private ?\DateTimeImmutable $dateDebut = null;
 
+    /**
+     * Date de prise de fonction à l'Assemblée (`mandature.datePriseFonction`),
+     * postérieure à {@see $dateDebut} qui porte la date d'élection : c'est celle
+     * que la fiche affiche (« entré en fonction en juillet 2024 ») et qui sert au
+     * calcul de l'ancienneté.
+     */
+    #[ORM\Column(type: 'date_immutable', nullable: true)]
+    #[Groups(['mandat:read', 'mandat:write', 'depute:read'])]
+    private ?\DateTimeImmutable $datePriseFonction = null;
+
     #[ORM\Column(type: 'date_immutable', nullable: true)]
     #[Groups(['mandat:read', 'mandat:write', 'depute:read'])]
     private ?\DateTimeImmutable $dateFin = null;
@@ -110,6 +120,18 @@ class Mandat
     public function setDateDebut(?\DateTimeImmutable $dateDebut): static
     {
         $this->dateDebut = $dateDebut;
+
+        return $this;
+    }
+
+    public function getDatePriseFonction(): ?\DateTimeImmutable
+    {
+        return $this->datePriseFonction;
+    }
+
+    public function setDatePriseFonction(?\DateTimeImmutable $datePriseFonction): static
+    {
+        $this->datePriseFonction = $datePriseFonction;
 
         return $this;
     }

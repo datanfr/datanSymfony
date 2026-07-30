@@ -2,6 +2,7 @@
 
 namespace App\Controller;
 
+use App\Depute\ComportementDepute;
 use App\Legislature;
 use App\Repository\ResultatCirconscriptionRepository;
 use Doctrine\DBAL\Connection;
@@ -23,17 +24,16 @@ use Symfony\Component\Routing\Attribute\Route;
  * site hôte : les injecter chez un tiers serait un défaut, pas une parité.
  *
  * Le contenu reprend les blocs de la fiche de député tels que ce portage les
- * rend aujourd'hui (positions, derniers votes, élection, comportement). Les
- * carrousels et les graphiques du comportement politique de datan.fr relèvent
- * d'un chantier de statistiques que la fiche elle-même n'a pas encore ; l'écart
- * est le même ici que sur /deputes, et signalé.
+ * rend : positions importantes, carrousel des derniers votes décryptés,
+ * élection, et graphiques de comportement politique (participation, loyauté,
+ * proximité par groupe). Les lectures de comportement et du carrousel sont
+ * partagées avec la fiche via {@see \App\Depute\ComportementDepute} — plus de
+ * duplication ici. Seul le rendu diffère : l'iframe bascule ses intitulés à la
+ * première personne (« Mon comportement politique ») sous `?first-person=true`,
+ * comme les partials `iframe/*_first_person` de l'origine.
  */
 class IframeController extends AbstractController
 {
-    private const OFFICIAL = 'decompteNominatif';
-
-    private const SOLENNEL = 'SPS';
-
     /**
      * Cache de trois jours, comme le `$this->output->cache("4320")` (minutes) de
      * l'application d'origine : une page très rappelée par des tiers, dont les
@@ -47,6 +47,7 @@ class IframeController extends AbstractController
     public function __construct(
         private readonly Connection $connection,
         private readonly ResultatCirconscriptionRepository $resultatsCirconscription,
+        private readonly ComportementDepute $comportement,
     ) {
     }
 
@@ -72,12 +73,19 @@ class IframeController extends AbstractController
         // qui porte un dpt_slug (donc une fiche) l'emporte, et sans dpt_slug il
         // n'y a pas de page à embarquer, donc 404.
         $depute = $this->connection->fetchAssociative(
+            // `dep.libelle_de` est l'article du département (« des », « du », avec son
+            // espace final quand il en faut un). Le bloc élection est rendu par le
+            // partial de la fiche, qui l'attend : sans cette jointure l'iframe écrivait
+            // « circonscription Hauts-de-Seine (92) » quand la fiche — et datan.fr, qui
+            // charge le même `_election.php` dans les deux contextes — écrit « des ».
             'SELECT d.id, d.mp_id, d.firstname, d.lastname, d.slug, d.dpt_slug, d.civilite,
                     d.departement_nom, d.departement_code, d.circonscription, d.region,
                     g.id AS groupe_id, g.libelle AS groupe_libelle, g.libelle_abrev AS groupe_abrev,
-                    g.couleur AS groupe_couleur
+                    g.couleur AS groupe_couleur,
+                    dep.libelle_de
              FROM depute d
              LEFT JOIN groupe g ON g.id = d.groupe_id
+             LEFT JOIN departement dep ON dep.code = d.departement_code
              WHERE d.slug = :slug
              ORDER BY (d.dpt_slug IS NULL), d.id
              LIMIT 1',
@@ -98,6 +106,11 @@ class IframeController extends AbstractController
             throw $this->createNotFoundException('Législature non diffusée.');
         }
 
+        // Statut (présent/passé des phrases) : un mandat le plus récent sans date
+        // de fin signifie que le député est en exercice — comme sur la fiche, et
+        // non depute.date_fin, jamais rafraîchie.
+        $actif = $mandats[0]['date_fin'] === null;
+
         $blocs = $this->blocsDemandes($request->query->get('categories'));
 
         $election = \in_array('election', $blocs, true)
@@ -115,16 +128,29 @@ class IframeController extends AbstractController
         $response = $this->render('iframe/depute.html.twig', [
             'depute' => $depute,
             'blocs' => $blocs,
-            'positions_cles' => \in_array('positions-importantes', $blocs, true) ? $this->positionsCles($deputeId) : [],
-            'derniers_votes' => \in_array('derniers-votes', $blocs, true) ? $this->derniersVotes($deputeId) : [],
-            'participation' => \in_array('comportement-politique', $blocs, true) ? $this->participation($deputeId) : null,
-            'loyaute' => \in_array('comportement-politique', $blocs, true) && $groupeId !== null ? $this->loyaute($deputeId, $groupeId) : null,
+            'actif' => $actif,
+            'nom_complet' => $depute['firstname'] . ' ' . $depute['lastname'],
+            // Bloc « positions importantes » : la sélection éditoriale figée de
+            // scrutins marquants, celle-là même que rend la fiche. L'iframe
+            // lisait jusqu'ici `positionsCles()` — des votes décryptés
+            // quelconques, une autre donnée sous le même titre.
+            'positions_importantes' => \in_array('positions-importantes', $blocs, true) ? $this->comportement->positionsImportantes($deputeId) : [],
+            // Carrousel « Ses derniers votes » : les scrutins DÉCRYPTÉS où le
+            // député s'est exprimé, mêmes cartes que la fiche (lecture partagée).
+            'carrousel_votes' => \in_array('derniers-votes', $blocs, true) ? $this->comportement->votesDecryptes($deputeId, 5) : [],
+            // Graphiques de comportement : mêmes jauges que la fiche. Null pour
+            // une fiche sans votes nominatifs (avant la 17e) — le bloc se tait,
+            // il n'affiche pas zéro (cf. CLAUDE.md), dans l'iframe comme ailleurs.
+            'statistiques' => \in_array('comportement-politique', $blocs, true)
+                ? $this->comportement->statistiques($deputeId, $groupeId, Legislature::COURANTE)
+                : null,
             'election' => $election,
             // Titres : « la députée » / « le député » (gender() de l'origine), et
             // « e » d'accord. La première personne (?first-person=true) bascule
             // « Son » en « Mon », comme les partials _first_person du legacy.
             'depute_mot' => $femme ? 'députée' : 'député',
             'accord' => $femme ? 'e' : '',
+            'pronom' => $femme ? 'elle' : 'il',
             'premiere_personne' => $premierePersonne,
             'possessif' => $premierePersonne ? 'Mon' : 'Son',
             'possessif_pluriel' => $premierePersonne ? 'Mes' : 'Ses',
@@ -175,109 +201,5 @@ class IframeController extends AbstractController
              ORDER BY legislature DESC, date_debut DESC',
             ['depute' => $deputeId],
         );
-    }
-
-    /**
-     * Positions du député sur les votes décryptés. Copie de la lecture de
-     * DeputeController : la fiche et l'iframe montrent le même bloc, mais le
-     * contrat interdit de toucher au contrôleur des députés — d'où la duplication.
-     *
-     * @return list<array<string, mixed>>
-     */
-    private function positionsCles(int $deputeId): array
-    {
-        return $this->connection->fetchAllAssociative(
-            'SELECT dcr.title, dcr.legislature, dcr.vote_numero, c.name AS categorie_name,
-                    v.position, s.sort_code, v.scrutin_date
-             FROM decryptage dcr
-             JOIN scrutin s ON s.id = dcr.scrutin_id
-             JOIN vote v ON v.scrutin_id = s.id AND v.depute_id = :depute AND v.vote_type = :type
-             LEFT JOIN categorie c ON c.id = dcr.categorie_id
-             WHERE dcr.state = :published AND v.position IN (\'pour\', \'contre\')
-             ORDER BY v.scrutin_date DESC
-             LIMIT 6',
-            ['depute' => $deputeId, 'type' => self::OFFICIAL, 'published' => 'published'],
-        );
-    }
-
-    /**
-     * @return list<array<string, mixed>>
-     */
-    private function derniersVotes(int $deputeId): array
-    {
-        return $this->connection->fetchAllAssociative(
-            'SELECT s.legislature, s.numero, s.titre, s.sort_code, v.position, v.scrutin_date,
-                    dcr.title AS decryptage_title
-             FROM vote v
-             JOIN scrutin s ON s.id = v.scrutin_id
-             LEFT JOIN decryptage dcr ON dcr.scrutin_id = s.id AND dcr.state = :published
-             WHERE v.depute_id = :depute AND v.vote_type = :type
-             ORDER BY v.scrutin_date DESC
-             LIMIT 10',
-            ['depute' => $deputeId, 'type' => self::OFFICIAL, 'published' => 'published'],
-        );
-    }
-
-    /**
-     * @return array{exprimes: int, total: int, taux: int|null}
-     */
-    private function participation(int $deputeId): array
-    {
-        $fenetre = $this->connection->fetchAssociative(
-            'SELECT MIN(v.scrutin_date) AS debut, MAX(v.scrutin_date) AS fin
-             FROM vote v WHERE v.depute_id = :depute',
-            ['depute' => $deputeId],
-        ) ?: [];
-
-        if (empty($fenetre['debut']) || empty($fenetre['fin'])) {
-            return ['exprimes' => 0, 'total' => 0, 'taux' => null];
-        }
-
-        $exprimes = (int) $this->connection->fetchOne(
-            'SELECT COUNT(*)
-             FROM vote v
-             JOIN scrutin s ON s.id = v.scrutin_id
-             WHERE v.depute_id = :depute AND v.vote_type = :type
-               AND s.code_type_vote = :solennel
-               AND v.position IN (\'pour\', \'contre\', \'abstention\')',
-            ['depute' => $deputeId, 'type' => self::OFFICIAL, 'solennel' => self::SOLENNEL],
-        );
-
-        $total = (int) $this->connection->fetchOne(
-            'SELECT COUNT(*) FROM scrutin s
-             WHERE s.code_type_vote = :solennel AND s.date_scrutin BETWEEN :debut AND :fin',
-            ['solennel' => self::SOLENNEL, 'debut' => $fenetre['debut'], 'fin' => $fenetre['fin']],
-        );
-
-        return [
-            'exprimes' => $exprimes,
-            'total' => $total,
-            'taux' => $total > 0 ? (int) round($exprimes / $total * 100) : null,
-        ];
-    }
-
-    /**
-     * @return array{conformes: int, total: int, taux: int|null}
-     */
-    private function loyaute(int $deputeId, int $groupeId): array
-    {
-        $row = $this->connection->fetchAssociative(
-            'SELECT COUNT(*) AS total, SUM(v.position = vg.position_majoritaire) AS conformes
-             FROM vote v
-             JOIN vote_groupe vg ON vg.scrutin_id = v.scrutin_id AND vg.groupe_id = :groupe
-             JOIN scrutin s ON s.id = v.scrutin_id
-             WHERE v.depute_id = :depute AND v.vote_type = :type
-               AND v.position IN (\'pour\', \'contre\', \'abstention\')',
-            ['depute' => $deputeId, 'groupe' => $groupeId, 'type' => self::OFFICIAL],
-        ) ?: [];
-
-        $total = (int) ($row['total'] ?? 0);
-        $conformes = (int) ($row['conformes'] ?? 0);
-
-        return [
-            'conformes' => $conformes,
-            'total' => $total,
-            'taux' => $total > 0 ? (int) round($conformes / $total * 100) : null,
-        ];
     }
 }

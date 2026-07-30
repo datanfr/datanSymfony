@@ -2,6 +2,7 @@
 
 namespace App\Controller;
 
+use App\Depute\ComportementDepute;
 use App\Legislature;
 use App\Referencement\OpenGraph;
 use App\Repository\ResultatCirconscriptionRepository;
@@ -24,10 +25,42 @@ class DeputeController extends AbstractController
     /** Les données d'un député ne bougent qu'au rythme des scrutins : cache d'une heure. */
     private const CACHE_TTL = 3600;
 
+    /** Rang du mandat en toutes lettres (`Depute_edito::get_nbr_lettre`) ; au-delà de 5, le chiffre. */
+    private const ORDINAUX = [1 => 'premier', 2 => 'deuxième', 3 => 'troisième', 4 => 'quatrième', 5 => 'cinquième'];
+
+    /**
+     * Mise en forme du nom du candidat parrainé (`Parrainages_model::change_candidate_name`) :
+     * la table `parrainage` stocke le nom en capitales façon état civil
+     * (« MACRON Emmanuel »), le site l'affiche en casse de lecture. Reprise à
+     * l'identique — « Gaspar Koenig » compris, orthographe de la source.
+     */
+    private const PARRAINAGE_CANDIDATS = [
+        'ARTHAUD Nathalie' => 'Nathalie Arthaud',
+        'ASSELINEAU François' => 'François Asselineau',
+        'DUPONT-AIGNAN Nicolas' => 'Nicolas Dupont-Aignan',
+        'HIDALGO Anne' => 'Anne Hidalgo',
+        'JADOT Yannick' => 'Yannick Jadot',
+        'KAZIB Anasse' => 'Anasse Kazib',
+        'KUZMANOVIC Georges' => 'Georges Kuzmanovic',
+        'LASSALLE Jean' => 'Jean Lassalle',
+        'LE PEN Marine' => 'Marine Le Pen',
+        'MACRON Emmanuel' => 'Emmanuel Macron',
+        'MÉLENCHON Jean-Luc' => 'Jean-Luc Mélenchon',
+        'PÉCRESSE Valérie' => 'Valérie Pécresse',
+        'POUTOU Philippe' => 'Philippe Poutou',
+        'ROUSSEL Fabien' => 'Fabien Roussel',
+        'THOUY Hélène' => 'Hélène Thouy',
+        'ZEMMOUR Éric' => 'Éric Zemmour',
+        'TAUBIRA Christiane' => 'Christiane Taubira',
+        'KOENIG Gaspard' => 'Gaspar Koenig',
+        'HERROU Cédric' => 'Cédric Herrou',
+    ];
+
     public function __construct(
         private readonly Connection $connection,
         private readonly ResultatCirconscriptionRepository $resultatsCirconscription,
         private readonly OpenGraph $openGraph,
+        private readonly ComportementDepute $comportement,
     ) {
     }
 
@@ -45,13 +78,16 @@ class DeputeController extends AbstractController
         // des députés annonce pourtant en 200. Même parade dans depute().
         $depute = $this->connection->fetchAssociative(
             'SELECT d.id, d.mp_id, d.firstname, d.lastname, d.slug, d.dpt_slug, d.civilite, d.age,
+                    d.date_naissance, d.ville_naissance,
                     d.date_fin, d.cause_fin, d.departement_nom, d.departement_code,
                     d.circonscription, d.region, d.place_hemicycle, d.profession, d.commission,
                     g.id AS groupe_id, g.libelle AS groupe_libelle, g.libelle_abrev AS groupe_abrev,
                     g.couleur AS groupe_couleur, g.position_politique,
+                    p.libelle AS parti_libelle, p.libelle_abrev AS parti_abrev,
                     dep.libelle_de
              FROM depute d
              LEFT JOIN groupe g ON g.id = d.groupe_id
+             LEFT JOIN parti p ON p.id = d.parti_id
              LEFT JOIN departement dep ON dep.code = d.departement_code
              WHERE d.slug = :slug
              ORDER BY (d.dpt_slug IS NULL), d.id
@@ -107,12 +143,51 @@ class DeputeController extends AbstractController
         $response = $this->render('depute/individual.html.twig', [
             'depute' => $depute,
             'actif' => $actif,
-            'participation' => $this->participation($deputeId),
-            'loyaute' => $groupeId !== null ? $this->loyaute($deputeId, $groupeId) : null,
-            'derniers_votes' => $this->derniersVotes($deputeId),
-            'positions_cles' => $this->positionsCles($deputeId),
+            // Positionnement gauche/centre/droite du groupe courant sur l'échiquier,
+            // pour la phrase « … un groupe classé à gauche de l'échiquier politique »
+            // du bloc biographique. Même table éditoriale que la carte de proximité.
+            'echiquier' => $depute['groupe_abrev'] !== null ? (ComportementDepute::ECHIQUIER[$depute['groupe_abrev']] ?? null) : null,
+            // Le bloc « Son comportement politique » : participation, loyauté et
+            // proximité par groupe, lues sur les tables précalculées (les moyennes
+            // comparatives interdisent tout calcul à la requête). Nul pour une
+            // fiche sans votes nominatifs — une législature d'avant la 17e. Lecture
+            // partagée avec l'iframe via le service ComportementDepute.
+            'statistiques' => $this->comportement->statistiques($deputeId, $groupeId, Legislature::COURANTE),
+            // Le carrousel « Ses derniers votes » de la fiche montre les cinq
+            // derniers scrutins DÉCRYPTÉS où le député s'est exprimé (avec sa
+            // position et son éventuelle explication), comme datan.fr — et non
+            // les dix derniers votes bruts. La liste complète reste sur /votes.
+            'carrousel_votes' => $this->comportement->votesDecryptes($deputeId, 5),
+            // Sélection éditoriale figée de scrutins marquants (« Ses positions
+            // importantes »), et non les votes décryptés génériques : cf.
+            // ComportementDepute::positionsImportantes.
+            'positions_importantes' => $this->comportement->positionsImportantes($deputeId),
+            // « né le 25 septembre 1989 à Arras » du paragraphe d'ouverture — jour
+            // sur deux chiffres, comme le strftime('%d %B %Y') du legacy.
+            'naissance' => $this->naissance($depute),
+            // « Ses participations électorales » et « Ses professions de foi »
+            // (`_elections_participation.php`, `_manifesto.php`).
+            'participations' => $this->participationsElectorales($deputeId),
+            'professions_foi' => $this->professionsFoi((string) $depute['mp_id']),
+            // « Sa dernière explication de vote » (`_explanation.php`).
+            'derniere_explication' => $this->derniereExplication($deputeId),
+            // Encart « dernier vote important » en tête de fiche (`voteFeature.php`) :
+            // la position du député sur le scrutin phare figé par le legacy.
+            'vote_feature' => $this->voteFeature($deputeId),
+            // Deux phrases du bloc biographique (`_bio.php`) : la commission
+            // parlementaire du député, et son entrée en fonction / ancienneté.
+            'commission' => $this->commission($deputeId, $depute['commission']),
+            'anciennete' => $this->anciennete($deputeId),
             'mandats' => $mandats,
             'election' => $election,
+            // Le parrainage présidentiel 2022 donné par le député, quand il siégeait
+            // (bloc « Ses parrainages présidentiels »). Nul pour la plupart.
+            'parrainage' => $this->parrainage((string) $depute['mp_id']),
+            // Pied de fiche « Les autres députés … » : ceux du groupe (député en
+            // exercice), de la législature (fiche d'un ancien) ou plus en activité
+            // (sortant), et ceux du département — comme `_other_mps.php`.
+            'autres_deputes' => $this->autresDeputes($depute, $mandats, $actif),
+            'contact' => $this->contact($deputeId),
             'ogp' => $this->openGraph->pourDepute($depute, $actif),
             'fil_ariane' => $this->filAriane($depute),
         ]);
@@ -140,7 +215,7 @@ class DeputeController extends AbstractController
         }
 
         $deputeId = (int) $depute['id'];
-        $decryptes = $this->votesDecryptes($deputeId);
+        $decryptes = $this->comportement->votesDecryptes($deputeId);
 
         $categories = [];
         foreach ($decryptes as $vote) {
@@ -151,16 +226,18 @@ class DeputeController extends AbstractController
         asort($categories);
 
         $mandats = $this->mandats($deputeId);
+        $actif = $mandats !== [] && $mandats[0]['date_fin'] === null;
 
         $response = $this->render('depute/votes.html.twig', [
             'depute' => $depute,
-            'actif' => $mandats !== [] && $mandats[0]['date_fin'] === null,
+            'actif' => $actif,
+            'mandats' => $mandats,
             'decryptes' => $decryptes,
             'categories' => $categories,
             'tous_les_votes' => $this->tousLesVotes($deputeId, $depute['groupe_id'] !== null ? (int) $depute['groupe_id'] : null),
-            // Pas de carte dédiée ici : le contrôleur d'origine ne compose le
-            // visuel de profil que pour la fiche et l'historique, la page des
-            // votes garde la carte générique.
+            // Même carte de profil que la fiche (card_individual, titre en span)
+            // et mêmes listes de pied de page — `deputes/votes.php` les rend aussi.
+            'autres_deputes' => $this->autresDeputes($depute, $mandats, $actif),
             'fil_ariane' => [...$this->filAriane($depute),
                 ['nom' => 'Votes', 'url' => $this->generateUrl('depute_votes', ['dptSlug' => $depute['dpt_slug'], 'slug' => $depute['slug']])],
             ],
@@ -213,16 +290,31 @@ class DeputeController extends AbstractController
         }
 
         $groupe = $this->groupeALegislature($deputeId, $legislature);
+        $actif = $mandats !== [] && $mandats[0]['date_fin'] === null;
 
+        // L'élection du mandat consulté (celle de 2022 pour une page de la 16e).
+        $election = $this->resultatsCirconscription->pourDepute(
+            $mandat['departement_code'],
+            $mandat['circonscription'] !== null ? (int) $mandat['circonscription'] : null,
+            $legislature,
+            (string) $depute['lastname'],
+        );
+
+        // Pas de bloc « comportement politique » ici : les votes nominatifs ne
+        // couvrent que la 17e législature (cf. CLAUDE.md) — datan.fr, qui a les
+        // votes des législatures passées, l'affiche ; nous nous taisons plutôt
+        // que de montrer des zéros (écart documenté, TODO §1).
         $response = $this->render('depute/legislature.html.twig', [
             'depute' => $depute,
+            'actif' => $actif,
             'mandat' => $mandat,
             'mandats' => $mandats,
             'legislature' => $legislature,
             'groupe' => $groupe,
-            'participation' => $this->participation($deputeId, $legislature),
-            'loyaute' => $groupe !== null ? $this->loyaute($deputeId, (int) $groupe['id'], $legislature) : null,
-            'derniers_votes' => $this->derniersVotes($deputeId, $legislature),
+            'election' => $election,
+            'naissance' => $this->naissance($depute),
+            'anciennete' => $this->anciennete($deputeId),
+            'contact' => $this->contact($deputeId),
             // La carte porte le groupe de l'époque, celui que la page affiche —
             // l'origine y met le dernier groupe connu, mais `depute.groupe_id`
             // ne porte que l'appartenance courante, vide pour un ancien député.
@@ -291,12 +383,253 @@ class DeputeController extends AbstractController
     }
 
     /**
+     * La plus récente explication de vote publiée par le député
+     * (`Deputes_model::get_last_explication`) : jointe au décryptage pour le
+     * titre, au scrutin pour la date et le lien, et au vote du député pour le
+     * badge de position — une explication sans ligne de vote se dit « absent »,
+     * comme le legacy.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function derniereExplication(int $deputeId): ?array
+    {
+        $ligne = $this->connection->fetchAssociative(
+            "SELECT e.texte, dcr.title, dcr.legislature, dcr.vote_numero,
+                    s.date_scrutin, v.position
+             FROM explication e
+             JOIN scrutin s ON s.id = e.scrutin_id
+             JOIN decryptage dcr ON dcr.scrutin_id = e.scrutin_id
+             LEFT JOIN vote v ON v.scrutin_id = e.scrutin_id AND v.depute_id = e.depute_id
+               AND v.vote_type = :type
+             WHERE e.depute_id = :depute AND e.publiee = 1
+             ORDER BY e.id DESC
+             LIMIT 1",
+            ['depute' => $deputeId, 'type' => self::OFFICIAL],
+        );
+
+        if ($ligne === false) {
+            return null;
+        }
+
+        // « Scrutin du 05 décembre 2025 » : jour sur deux chiffres, comme le
+        // date_format(%d %M %Y) de l'origine.
+        $ligne['date_fr'] = (new \IntlDateFormatter('fr_FR', \IntlDateFormatter::NONE, \IntlDateFormatter::NONE, null, null, 'dd MMMM y'))
+            ->format(new \DateTimeImmutable((string) $ligne['date_scrutin']));
+
+        return $ligne;
+    }
+
+    /**
+     * Date et ville de naissance pour le paragraphe d'ouverture de la bio
+     * (`_bio.php` : « né le 25 septembre 1989 à Arras »). Le legacy formate en
+     * `strftime('%d %B %Y')` : jour sur deux chiffres, mois en toutes lettres.
+     *
+     * @param array<string, mixed> $depute
+     *
+     * @return array{date: string, ville: ?string}|null
+     */
+    private function naissance(array $depute): ?array
+    {
+        if (empty($depute['date_naissance'])) {
+            return null;
+        }
+
+        $date = (new \IntlDateFormatter('fr_FR', \IntlDateFormatter::NONE, \IntlDateFormatter::NONE, null, null, 'dd MMMM y'))
+            ->format(new \DateTimeImmutable((string) $depute['date_naissance']));
+
+        return ['date' => $date, 'ville' => $depute['ville_naissance'] ?? null];
+    }
+
+    /**
+     * Les candidatures du député à des élections pendant son mandat, pour le bloc
+     * « Ses participations électorales » (`Elections_model::get_candidate_elections`
+     * avec `visible = 1` et `candidature = 1`, tri par année décroissante).
+     *
+     * Le libellé de circonscription suit `get_district` : le nom du département
+     * pour des législatives — seule sorte en base à ce jour, les municipales 2026
+     * n'étant pas portées (cf. CLAUDE.md) ; à défaut, le district brut.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function participationsElectorales(int $deputeId): array
+    {
+        return $this->connection->fetchAllAssociative(
+            "SELECT e.annee, e.libelle, c.elu,
+                    COALESCE(dep.nom, c.district) AS district
+             FROM candidature c
+             JOIN election e ON e.id = c.election_id
+             LEFT JOIN departement dep ON e.libelle_abrege = 'Législatives' AND dep.code = c.district
+             WHERE c.depute_id = :depute AND c.visible = 1 AND c.candidat = 1
+             ORDER BY e.annee DESC",
+            ['depute' => $deputeId],
+        );
+    }
+
+    /**
+     * Les professions de foi du député (`Deputes_model::get_professions`) : une
+     * ligne par élection, un chemin d'asset par tour — les PDF vivent sous
+     * `assets/data/professions/election_<id>/`, comme sur datan.fr.
+     *
+     * La table est vide tant que `app:import:professions-foi` n'a pas été rejouée
+     * contre la vraie base de production (le backup public la vide) : le bloc de
+     * la fiche reste alors masqué.
+     *
+     * @return list<array{election: string, tour1: ?string, tour2: ?string}>
+     */
+    private function professionsFoi(string $mpId): array
+    {
+        $lignes = $this->connection->fetchAllAssociative(
+            'SELECT pf.election_id, pf.fichier, pf.tour, e.libelle, e.annee
+             FROM profession_foi pf
+             JOIN election e ON e.id = pf.election_id
+             WHERE pf.mp_id = :mp
+             ORDER BY e.annee DESC, pf.tour',
+            ['mp' => $mpId],
+        );
+
+        $parElection = [];
+        foreach ($lignes as $ligne) {
+            $id = (int) $ligne['election_id'];
+            $parElection[$id] ??= ['election' => $ligne['libelle'] . ' ' . $ligne['annee'], 'tour1' => null, 'tour2' => null];
+            $chemin = 'assets/data/professions/election_' . $id . '/' . $ligne['fichier'];
+            if ((int) $ligne['tour'] === 1) {
+                $parElection[$id]['tour1'] = $chemin;
+            } else {
+                $parElection[$id]['tour2'] = $chemin;
+            }
+        }
+
+        return array_values($parElection);
+    }
+
+    /**
+     * Parrainage présidentiel 2022 donné par le député pendant son mandat
+     * (`Parrainages_model::get_mp_parrainage($mp, 2022)`). Un député n'en a qu'un
+     * au plus — la table ne porte que 2022 —, d'où le `LIMIT 1` de l'origine.
+     * Le nom du candidat est remis en casse de lecture.
+     *
+     * @return array{candidat: string, annee: int}|null
+     */
+    private function parrainage(string $mpId): ?array
+    {
+        $ligne = $this->connection->fetchAssociative(
+            'SELECT candidat, annee FROM parrainage
+             WHERE mp_id = :mp AND annee = 2022 LIMIT 1',
+            ['mp' => $mpId],
+        );
+
+        if ($ligne === false) {
+            return null;
+        }
+
+        return [
+            'candidat' => self::PARRAINAGE_CANDIDATS[$ligne['candidat']] ?? $ligne['candidat'],
+            'annee' => (int) $ligne['annee'],
+        ];
+    }
+
+    /**
+     * Listes du pied de fiche « Les autres députés … » (`_other_mps.php`,
+     * `Depute_service::get_other_mps`), en trois volets selon le contexte, plus
+     * les députés du même département.
+     *
+     * Le premier volet dépend de la fiche affichée :
+     * - fiche d'une législature passée → les députés de CETTE législature ;
+     * - député en exercice → les autres membres de son groupe (l'appartenance
+     *   courante, `depute.groupe_id`, est ici la bonne : le député est actif) ;
+     * - sortant (dernier mandat clos) → les députés ayant siégé à la 15e, quirk
+     *   du legacy (`get_other_deputes` else : `dateFin IS NOT NULL AND legislature = 15`).
+     *
+     * Le tri reproduit celui de l'origine : les noms à partir de l'initiale du
+     * député d'abord (`nameLast < LEFT(nom, 1)`), puis alphabétique. On n'affiche
+     * que les députés à fiche (`dpt_slug IS NOT NULL`), pour ne jamais lier un 404.
+     *
+     * @param array<string, mixed>            $depute
+     * @param list<array<string, mixed>>      $mandats
+     *
+     * @return array{autres: list<array<string, mixed>>, contexte: string, legislature: int, departement: list<array<string, mixed>>}
+     */
+    private function autresDeputes(array $depute, array $mandats, bool $actif): array
+    {
+        $id = (int) $depute['id'];
+        $nom = (string) $depute['lastname'];
+        $legislatureFiche = $mandats !== [] ? (int) $mandats[0]['legislature'] : Legislature::COURANTE;
+
+        $colonnes = 'd.firstname, d.lastname, d.slug, d.dpt_slug';
+        $tri = 'ORDER BY d.lastname < LEFT(:nom, 1), d.lastname LIMIT 15';
+
+        if ($legislatureFiche === Legislature::COURANTE && $actif) {
+            $contexte = 'groupe';
+            $autres = $depute['groupe_id'] === null ? [] : $this->connection->fetchAllAssociative(
+                "SELECT $colonnes FROM depute d
+                 WHERE d.groupe_id = :gid AND d.id <> :id AND d.dpt_slug IS NOT NULL
+                   AND EXISTS (SELECT 1 FROM mandat m WHERE m.depute_id = d.id AND m.date_fin IS NULL)
+                 $tri",
+                ['gid' => (int) $depute['groupe_id'], 'id' => $id, 'nom' => $nom],
+            );
+        } elseif ($legislatureFiche === Legislature::COURANTE) {
+            $contexte = 'inactifs';
+            $autres = $this->connection->fetchAllAssociative(
+                "SELECT $colonnes FROM depute d
+                 WHERE d.id <> :id AND d.dpt_slug IS NOT NULL
+                   AND EXISTS (SELECT 1 FROM mandat m WHERE m.depute_id = d.id AND m.legislature = 15)
+                 $tri",
+                ['id' => $id, 'nom' => $nom],
+            );
+        } else {
+            $contexte = 'legislature';
+            // Legacy `get_other_deputes_legislature` : `deputes_last.legislature = :leg`,
+            // c.-à-d. les députés dont la DERNIÈRE législature est celle-ci (partis
+            // après elle), pas tous ceux qui y ont siégé — un député encore en
+            // exercice appartient à la 17e, jamais à cette liste. D'où le MAX.
+            $autres = $this->connection->fetchAllAssociative(
+                "SELECT $colonnes FROM depute d
+                 WHERE d.id <> :id AND d.dpt_slug IS NOT NULL
+                   AND (SELECT MAX(m.legislature) FROM mandat m WHERE m.depute_id = d.id) = :leg
+                 $tri",
+                ['leg' => $legislatureFiche, 'id' => $id, 'nom' => $nom],
+            );
+        }
+
+        // Députés en activité du département — le legacy n'en exclut pas le député
+        // courant (`get_deputes_all` sans `mpId !=`), reproduit tel quel.
+        $departement = $this->connection->fetchAllAssociative(
+            "SELECT $colonnes FROM depute d
+             WHERE d.dpt_slug = :dpt AND d.dpt_slug IS NOT NULL
+               AND EXISTS (SELECT 1 FROM mandat m WHERE m.depute_id = d.id AND m.date_fin IS NULL)
+             ORDER BY d.lastname, d.firstname",
+            ['dpt' => $depute['dpt_slug']],
+        );
+
+        return ['autres' => $autres, 'contexte' => $contexte, 'legislature' => $legislatureFiche, 'departement' => $departement];
+    }
+
+    /**
+     * Coordonnées et réseaux sociaux du député (`contact_depute`, alimentée par
+     * le chantier réseaux sociaux). Lue en DBAL, comme tout le reste de la
+     * fiche — pas d'hydratation d'entité sur une page de lecture.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function contact(int $deputeId): ?array
+    {
+        $contact = $this->connection->fetchAssociative(
+            'SELECT site_web, mail_an, twitter, facebook, bluesky
+             FROM contact_depute WHERE depute_id = :depute',
+            ['depute' => $deputeId],
+        );
+
+        return $contact === false ? null : $contact;
+    }
+
+    /**
      * @return array<string, mixed>
      */
     private function depute(string $slug): array
     {
         $depute = $this->connection->fetchAssociative(
             'SELECT d.id, d.mp_id, d.firstname, d.lastname, d.slug, d.dpt_slug, d.civilite,
+                    d.age, d.commission, d.date_naissance, d.ville_naissance,
                     d.departement_nom, d.departement_code, d.circonscription,
                     g.id AS groupe_id, g.libelle AS groupe_libelle, g.libelle_abrev AS groupe_abrev,
                     g.couleur AS groupe_couleur, g.legislature AS groupe_legislature,
@@ -321,36 +654,6 @@ class DeputeController extends AbstractController
         }
 
         return $depute;
-    }
-
-    /**
-     * Votes décryptés sur lesquels le député s'est prononcé, avec son
-     * explication de vote quand il en a publié une.
-     *
-     * Un scrutin où il n'a pas de ligne `vote` n'apparaît pas : l'application
-     * d'origine écarte aussi les non-votants (`vs.vote != 'nv'`), une absence
-     * n'étant pas une position.
-     *
-     * @return list<array<string, mixed>>
-     */
-    private function votesDecryptes(int $deputeId): array
-    {
-        return $this->connection->fetchAllAssociative(
-            'SELECT dcr.title, dcr.legislature, dcr.vote_numero,
-                    c.name AS categorie_name, c.slug AS categorie_slug,
-                    l.name AS lecture_name,
-                    s.date_scrutin, v.position,
-                    e.texte AS explication
-             FROM decryptage dcr
-             JOIN scrutin s ON s.id = dcr.scrutin_id
-             JOIN vote v ON v.scrutin_id = s.id AND v.depute_id = :depute
-             LEFT JOIN categorie c ON c.id = dcr.categorie_id
-             LEFT JOIN lecture l ON l.id = dcr.lecture_id
-             LEFT JOIN explication e ON e.scrutin_id = s.id AND e.depute_id = :depute AND e.publiee = 1
-             WHERE dcr.state = :published AND v.position IN (\'pour\', \'contre\', \'abstention\')
-             ORDER BY s.date_scrutin DESC',
-            ['depute' => $deputeId, 'published' => 'published'],
-        );
     }
 
     /**
@@ -524,24 +827,134 @@ class DeputeController extends AbstractController
     }
 
     /**
-     * Positions du député sur les votes décryptés par la rédaction : ce sont les
-     * scrutins que le site met en avant comme les plus parlants.
+     * Le vote mis en avant en tête de fiche (`voteFeature.php`) : la position du
+     * député sur le scrutin phare du moment, codé en dur dans l'application
+     * d'origine (`Deputes::index` : 17e législature, scrutin n° 3684 — la
+     * suspension de la réforme des retraites). Seule cette position est
+     * dynamique ; le reste de l'encart est un texte éditorial figé.
      *
-     * @return list<array<string, mixed>>
+     * Nul si le député n'a pas de ligne de vote sur ce scrutin (ancien, absent) :
+     * l'encart disparaît alors, comme le legacy.
+     *
+     * @return array{legislature: int, numero: int, position: string}|null
      */
-    private function positionsCles(int $deputeId): array
+    private function voteFeature(int $deputeId): ?array
     {
-        return $this->connection->fetchAllAssociative(
-            'SELECT dcr.title, dcr.legislature, dcr.vote_numero, c.name AS categorie_name,
-                    v.position, s.sort_code, v.scrutin_date
-             FROM decryptage dcr
-             JOIN scrutin s ON s.id = dcr.scrutin_id
-             JOIN vote v ON v.scrutin_id = s.id AND v.depute_id = :depute AND v.vote_type = :type
-             LEFT JOIN categorie c ON c.id = dcr.categorie_id
-             WHERE dcr.state = :published AND v.position IN (\'pour\', \'contre\')
-             ORDER BY v.scrutin_date DESC
-             LIMIT 6',
-            ['depute' => $deputeId, 'type' => self::OFFICIAL, 'published' => 'published'],
+        $position = $this->connection->fetchOne(
+            'SELECT v.position FROM vote v
+             JOIN scrutin s ON s.id = v.scrutin_id
+             WHERE v.depute_id = :depute AND s.legislature = 17 AND s.numero = 3684',
+            ['depute' => $deputeId],
         );
+
+        return $position === false
+            ? null
+            : ['legislature' => 17, 'numero' => 3684, 'position' => (string) $position];
+    }
+
+    /**
+     * Commission parlementaire du député pour la phrase « … est membre de la
+     * Commission des affaires étrangères. » du bloc bio (`Deputes_model::get_commission_parlementaire`).
+     *
+     * On prend la commission en cours (`fonction_commission.date_fin IS NULL`)
+     * dont le libellé abrégé est celui déjà retenu par l'import pour la carte de
+     * profil (`depute.commission`) : la phrase et la carte désignent ainsi la
+     * même commission. Le libellé complet (« Commission des affaires étrangères »)
+     * et la qualité (« Membre », « Président »…) viennent de la jointure.
+     *
+     * @return array{libelle: string, role: string}|null
+     */
+    private function commission(int $deputeId, ?string $abrege): ?array
+    {
+        if ($abrege === null) {
+            return null;
+        }
+
+        $ligne = $this->connection->fetchAssociative(
+            'SELECT c.libelle, fc.code_qualite AS role
+             FROM fonction_commission fc
+             JOIN commission c ON c.id = fc.commission_id
+             WHERE fc.depute_id = :depute AND fc.date_fin IS NULL
+               AND fc.code_qualite IS NOT NULL AND c.libelle_abrege = :abrege
+             ORDER BY fc.legislature DESC
+             LIMIT 1',
+            ['depute' => $deputeId, 'abrege' => $abrege],
+        );
+
+        return $ligne === false ? null : $ligne;
+    }
+
+    /**
+     * Entrée en fonction et ancienneté du député, pour le paragraphe
+     * « … est entré en fonction en juillet 2024 et en est à son deuxième mandat.
+     * Au total, … a passé 4 ans sur les bancs… » (`daily.php:3960-3999`).
+     *
+     * L'ancienneté est la somme des durées de mandat (mandat ouvert → aujourd'hui)
+     * comptée depuis la prise de fonction (à défaut la date de début) ; la moyenne
+     * est celle de tous les députés, calculée pareil. Le mois affiché est la prise
+     * de fonction du mandat le plus récent.
+     *
+     * @return array{ordinal: string, length_edited: string, moyenne: int, edito: string, debut: \DateTimeImmutable}|null
+     */
+    private function anciennete(int $deputeId): ?array
+    {
+        $mandatsN = (int) $this->connection->fetchOne(
+            'SELECT COUNT(*) FROM mandat WHERE depute_id = :depute',
+            ['depute' => $deputeId],
+        );
+
+        $debut = $this->connection->fetchOne(
+            'SELECT COALESCE(date_prise_fonction, date_debut) FROM mandat
+             WHERE depute_id = :depute ORDER BY legislature DESC, date_debut DESC LIMIT 1',
+            ['depute' => $deputeId],
+        );
+
+        if ($mandatsN === 0 || $debut === false || $debut === null) {
+            return null;
+        }
+
+        // Jours d'ancienneté du député et jours moyens de tous les députés, en une
+        // requête : COALESCE(prise de fonction, début) borne chaque mandat, un
+        // mandat encore ouvert court jusqu'à aujourd'hui.
+        $duree = 'DATEDIFF(COALESCE(date_fin, CURDATE()), COALESCE(date_prise_fonction, date_debut))';
+        $ligne = $this->connection->fetchAssociative(
+            "SELECT
+                (SELECT SUM($duree) FROM mandat WHERE depute_id = :depute) AS jours,
+                (SELECT AVG(t.jours) FROM
+                   (SELECT SUM($duree) AS jours FROM mandat GROUP BY depute_id) t) AS jours_moyens",
+            ['depute' => $deputeId],
+        );
+
+        $annees = (int) round(((int) $ligne['jours']) / 365);
+        $moyenne = (int) round(((float) $ligne['jours_moyens']) / 365);
+
+        // Mois de prise de fonction en toutes lettres (« juillet 2024 »), comme le
+        // legacy (`strftime('%B %Y')`). ICU en français rend le mois en minuscules.
+        $mois = (new \IntlDateFormatter('fr_FR', \IntlDateFormatter::NONE, \IntlDateFormatter::NONE, null, null, 'MMMM y'))
+            ->format(new \DateTimeImmutable((string) $debut));
+
+        return [
+            'ordinal' => self::ORDINAUX[$mandatsN] ?? (string) $mandatsN,
+            'mois' => $mois,
+            'length_edited' => $this->ancienneteEnLettres((int) $ligne['jours']),
+            'moyenne' => $moyenne,
+            'edito' => $annees < $moyenne ? 'moins' : ($annees > $moyenne ? 'plus' : 'autant'),
+        ];
+    }
+
+    /**
+     * Ancienneté en toutes lettres, comme le legacy (`daily.php:3994`) : en années
+     * dès un an, sinon en mois, sinon en jours.
+     */
+    private function ancienneteEnLettres(int $jours): string
+    {
+        $annees = (int) round($jours / 365);
+        if ($annees >= 1) {
+            return $annees . ($annees > 1 ? ' ans' : ' an');
+        }
+
+        $mois = (int) round($jours / 30);
+
+        return $mois !== 0 ? $mois . ' mois' : $jours . ' jours';
     }
 }

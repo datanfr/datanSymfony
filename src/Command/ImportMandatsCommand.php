@@ -80,6 +80,22 @@ class ImportMandatsCommand extends Command
     private function importDetails(string $file, array $deputeIdByMpId): int
     {
         $slugger = new AsciiSlugger('fr');
+
+        // Le segment de département de l'URL est `departement.slug`, la table
+        // tenue à la main du legacy — c'est LUI l'adresse servie par datan.fr,
+        // indexée depuis des années. Cinq départements diffèrent du slug qu'on
+        // fabriquerait depuis le nom (CLAUDE.md, « deux jeux de slugs ») :
+        // `francais-de-letranger` et non `francais-etablis-hors-de-france-099`,
+        // `cote-dor-21` et non `cote-d-or-21` (l'AsciiSlugger coupe l'apostrophe
+        // en tiret là où le legacy l'élide), idem Côtes-d'Armor, Val-d'Oise, et
+        // `saint-barthelemy-et-saint-martin` sans le code. On indexe en
+        // minuscules : `departement.code` écrit la Corse « 2B », le TSV « 2B »
+        // aussi, mais la casse ne doit rien changer à l'appariement.
+        $slugDeptParCode = [];
+        foreach ($this->connection->fetchAllKeyValue('SELECT LOWER(code), slug FROM departement') as $code => $slug) {
+            $slugDeptParCode[$code] = $slug;
+        }
+
         $handle = fopen($file, 'r');
         $count = 0;
         $batch = [];
@@ -97,11 +113,15 @@ class ImportMandatsCommand extends Command
                 continue;
             }
 
-            // « Nord » + « 59 » → « nord-59 », segment attendu dans l'URL publique.
-            // Le strtolower() enveloppe AUSSI le code : « 2B » doit devenir « 2b »,
-            // sans quoi les routes de député ([a-z0-9\-]+) refusent la Corse — et les
-            // collations de MariaDB, insensibles à la casse, ne laissent rien voir.
-            $dptSlug = strtolower($slugger->slug($departement)->toString() . '-' . $numDept);
+            // `departement.slug` fait foi dès qu'il existe (la quasi-totalité des
+            // cas). Repli seulement pour un code absent de la table du legacy —
+            // un département qu'il n'aurait pas encore slugué : « Nord » + « 59 »
+            // → « nord-59 ». Le strtolower() y enveloppe AUSSI le code (« 2B » →
+            // « 2b »), sans quoi les routes de député ([a-z0-9\-]+) refuseraient
+            // la Corse — mais ce chemin ne sert plus qu'aux départements que le
+            // legacy ignore, la table tenue à la main tranchant tous les autres.
+            $dptSlug = $slugDeptParCode[strtolower($numDept)]
+                ?? strtolower($slugger->slug($departement)->toString() . '-' . $numDept);
 
             $batch[] = [
                 $dptSlug,

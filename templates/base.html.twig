@@ -9,10 +9,28 @@
     {# Le bloc `meta_description` ne contient que le TEXTE : le gabarit fabrique
        la balise et resservira le même texte à og:description et
        twitter:description — l'application d'origine passait un unique
-       $description_meta aux deux endroits. #}
+       $description_meta aux deux endroits.
+
+       **Le texte du bloc est déjà échappé, et ne doit plus l'être.** Twig
+       échappe les variables au moment où le bloc les rend ; `block()` rend donc
+       du HTML, et le marque « safe » pour qu'on ne l'échappe pas deux fois. Ce
+       marquage ne survit ni au `|trim` (indispensable, les blocs multilignes
+       portent leur indentation) ni au passage par une variable — les deux le
+       perdent, chacun suffit. L'insertion ré-échappait donc une chaîne déjà
+       échappée et la balise sortait `d&amp;#039;Ajaccio` là où datan.fr écrit
+       `d'Ajaccio` : 3 353 fiches de ville, les pages de département et tout nom
+       à apostrophe du site. C'est le SECOND échappement qui est de trop, pas le
+       premier — d'où le `|raw`, qui rétablit le marquage sans rien désarmer.
+
+       Ce que le `|raw` suppose : que les 49 blocs `meta_description` n'écrivent
+       que du texte. Vérifié — aucun n'emploie `|raw` ni `autoescape`, et aucun
+       ne porte en dur un guillemet, une esperluette ou un chevron, que le
+       double échappement neutralisait par accident. Un bloc qui en écrirait un
+       sortirait de l'attribut `content="…"` : y mettre `{{ '…' }}`, pas le
+       caractère nu. #}
     {% set description_page = block('meta_description') is defined ? block('meta_description')|trim : '' %}
     {% if description_page %}
-      <meta name="description" content="{{ description_page }}">
+      <meta name="description" content="{{ description_page|raw }}">
     {% endif %}
     <meta name="theme-color" content="#00668e">
 
@@ -28,8 +46,16 @@
        les autres retombent sur la carte générique au logo, comme l'origine. #}
     {% set ogp = ogp is defined ? ogp : {} %}
     {% set og_image = ogp.image ?? absolute_url(asset('assets/imgs/datan/logo_social_media.png')) %}
+    {# Les deux branches doivent arriver échappées une fois et une seule : celle
+       du bloc l'est déjà, celle du contrôleur ne l'est pas. On échappe donc ici
+       ce qui vient du contrôleur, et l'insertion pose `|raw` sur les deux — un
+       `{{ ogp.description ?? description_page }}` échapperait correctement la
+       première et une fois de trop la seconde. Aucun contrôleur ne renseigne
+       `description` à ce jour ({@see App\Referencement\OpenGraph}, qui ne pose
+       que titre, type et image) ; la branche est écrite pour le jour où. #}
+    {% set description_sociale = ogp.description is defined ? ogp.description|escape('html') : description_page %}
     <meta property="og:title" content="{{ ogp.titre ?? block('title') }}" />
-    <meta property="og:description" content="{{ ogp.description ?? description_page }}" />
+    <meta property="og:description" content="{{ description_sociale|raw }}" />
     <meta property="og:type" content="{{ ogp.type ?? 'website' }}" />
     <meta property="og:url" content="{{ url_canonique }}" />
     <meta property="og:image" content="{{ og_image }}" />
@@ -42,7 +68,7 @@
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:site" content="@datanFR" />
     <meta name="twitter:title" content="{{ ogp.titre ?? block('title') }}" />
-    <meta name="twitter:description" content="{{ ogp.description ?? description_page }}" />
+    <meta name="twitter:description" content="{{ description_sociale|raw }}" />
     <meta name="twitter:image" content="{{ og_image }}" />
     <meta name="twitter:creator" content="@awenig">
     {% if ogp.prenom is defined %}
@@ -167,7 +193,11 @@
       }
     </style>
   </head>
-  <body data-spy="scroll" data-target="#navScrollspy" data-offset="90">
+  {# L'attribut class est servi vide sur toute page, comme l'origine
+     (header.php:197 y verse `$mentions`) : son seul consommateur est la règle
+     `body:not(.pg-mentions) #tarteaucitronIcon` de main.css, qui masque
+     l'icône du gestionnaire de cookies partout sauf aux mentions légales. #}
+  <body class="{% block classe_body %}{% endblock %}" data-spy="scroll" data-target="#navScrollspy" data-offset="90">
     <!-- MAIN NAVBAR -->
     <nav class="navbar navbar-expand-lg navbar-light sticky-top" id="navbar-datan">
       <div class="container p-0">
@@ -185,6 +215,40 @@
           <li class="nav-item ml-md-2">
             <a class="no-decoration btn btn-info" href="{{ path('page_soutenir') }}">Nous soutenir</a>
           </li>
+          {# Le menu du connecté, comme l'origine (header.php:213-233). Pour un
+             anonyme sans cookie, app.user ne démarre pas de session (pare-feu
+             lazy) : les pages publiques restent cachables. Un porteur de
+             session contourne, lui, le cache partagé (CacheAvecSession) —
+             sans quoi il verrait la navbar anonyme déjà en magasin. #}
+          {% if app.user %}
+            <li class="nav-item dropdown ml-1 ml-md-2" id="nav-logged-in">
+              <a class="dropdown-toggle no-decoration btn btn-primary" href="#" id="navbarDropdownMenuLink" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                {# person-fill.svg inliné SANS son <title>Âge</title> : le
+                   fichier sert à la fiche député, où ce titre a un sens —
+                   ici, le legacy recopiait le fichier tel quel, défaut
+                   d'accessibilité corrigé. #}
+                <svg width="1em" height="1em" viewBox="0 0 16 16" class="bi bi-person-fill" fill="currentColor" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                  <path fill-rule="evenodd" d="M3 14s-1 0-1-1 1-4 6-4 6 3 6 4-1 1-1 1H3zm5-6a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/>
+                </svg>
+                <span class="d-none d-lg-inline">{{ app.user.identifiant }}</span>
+              </a>
+              <div class="dropdown-menu dropdown-menu-right" aria-labelledby="navbarDropdownMenuLink" style="z-index: 9999 !important">
+                <a href="{{ path('mon_compte') }}" class="dropdown-item no-decoration">Mon compte</a>
+                {# ROLE_REDACTEUR couvre l'administrateur par la hiérarchie de
+                   rôles ; les familles étant exclusives (getRoles), un député
+                   tombe sur la branche suivante, un lecteur sur aucune —
+                   exactement les `type` du legacy. « Scripts » (admin seul à
+                   l'origine) n'est pas porté : ses moulinettes sont devenues
+                   nos commandes console, il n'y a plus d'écran à ouvrir. #}
+                {% if is_granted('ROLE_REDACTEUR') %}
+                  <a class="dropdown-item no-decoration" href="{{ path('admin_decryptage_index') }}">Dashboard</a>
+                {% elseif is_granted('ROLE_DEPUTE') %}
+                  <a class="dropdown-item no-decoration" href="{{ path('dashboard') }}">Dashboard</a>
+                {% endif %}
+                <a href="{{ path('deconnexion') }}" class="dropdown-item no-decoration">Déconnexion</a>
+              </div>
+            </li>
+          {% endif %}
         </ul>
       </div>
     </nav>

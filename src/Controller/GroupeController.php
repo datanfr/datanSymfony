@@ -5,8 +5,14 @@ namespace App\Controller;
 use App\BlocPolitique;
 use App\CouleurGroupe;
 use App\Entity\Dossier;
+use App\Depute\ComportementDepute;
 use App\Entity\FonctionGroupe;
 use App\FamilleGroupe;
+use App\FamilleSocioPro;
+use App\Groupe\EditoGroupe;
+use App\Groupe\MoyennesAssemblee;
+use App\Groupe\SoutienGouvernement;
+use App\Groupe\StatistiquesGroupe;
 use App\Legislature;
 use App\NatureVote;
 use App\Referencement\OpenGraph;
@@ -37,10 +43,37 @@ class GroupeController extends AbstractController
     /** Position politique de la majorité présidentielle, telle que l'Assemblée la déclare. */
     private const POSITION_MAJORITAIRE = 'Majoritaire';
 
+    /**
+     * Sigles ramenés à leur successeur dans l'affichage des coalitions.
+     *
+     * Le site ne recolle qu'UNE filiation — UDR → UDDPLR
+     * (`clean_libelleAbrev()`, daily.php:4580) — et regroupe ses coalitions
+     * sur le libellé ainsi corrigé. Ne pas généraliser aux autres familles :
+     * SOC et SOC-A restent distincts en 16e, et les coalitions socialistes se
+     * scindent au 19/10/2023, badge SOC sur les lignes d'avant — c'est ce
+     * qu'affiche datan.fr. Une version dérivée de {@see FamilleGroupe} les
+     * fusionnait et rebaptisait SOC-A des coalitions que le site étiquette SOC.
+     */
+    private const SIGLES_CANONIQUES = ['UDR' => 'UDDPLR'];
+
+    /**
+     * Rangs en toutes lettres des titres de classement (« Le sixième groupe
+     * avec les députés les plus âgés »), portés d'`ordinaux()`. La table de
+     * l'origine s'arrête à onze, le nombre de groupes que compte l'Assemblée.
+     */
+    private const ORDINAUX = [
+        1 => 'premier', 2 => 'deuxième', 3 => 'troisième', 4 => 'quatrième',
+        5 => 'cinquième', 6 => 'sixième', 7 => 'septième', 8 => 'huitième',
+        9 => 'neuvième', 10 => 'dixième', 11 => 'onzième',
+    ];
+
     public function __construct(
         private readonly Connection $connection,
         private readonly OpenGraph $openGraph,
         private readonly DatanExtension $datan,
+        private readonly SoutienGouvernement $soutienGouvernement,
+        private readonly MoyennesAssemblee $moyennes,
+        private readonly StatistiquesGroupe $statistiques,
     ) {
     }
 
@@ -66,22 +99,100 @@ class GroupeController extends AbstractController
 
         // Le graphique comparatif n'a de sens qu'entre groupes contemporains.
         $comparatif = $soutien['votes'] > 0 && $legislature === Legislature::COURANTE
-            ? $this->soutienTousGroupes($legislature)
+            ? $this->soutienGouvernement->tousLesGroupes($legislature)
             : [];
 
-        $membres = array_merge($composition['membres'], $composition['apparentes']);
+        // Le président compte dans l'effectif du groupe, comme à l'Assemblée.
+        $membres = array_merge(...array_values($composition));
+        $chiffres = $this->chiffres($membres);
+        $legislature = (int) $groupe['legislature'];
+        $sigle = (string) $groupe['libelle_abrev'];
+
+        // Les proximités servent deux lectures : le classement complet nourrit
+        // les graphiques « vote souvent / rarement avec », et la ligne du
+        // groupe majoritaire — quand il en existe un — la carte qui lui est
+        // consacrée. Les non-inscrits en sont écartés : ils ne forment pas un
+        // groupe et ne s'allient pas.
+        $proximites = array_map(
+            // La phrase qui commente le classement situe chaque voisin deux
+            // fois : par son rapport au gouvernement et par son côté de
+            // l'échiquier. Les deux sont des lectures de la rédaction, pas des
+            // données de l'open data.
+            static fn (array $ligne) => $ligne + [
+                'maj_pres' => match ($ligne['position_politique']) {
+                    'Opposition' => "un groupe d'opposition",
+                    self::POSITION_MAJORITAIRE => 'le groupe de la majorité présidentielle, qui est',
+                    'Minoritaire' => 'un groupe allié à la majorité présidentielle et',
+                    default => 'qui regroupe les députés non affiliés à un groupe parlementaire',
+                },
+                'echiquier' => ComportementDepute::ECHIQUIER[$ligne['libelle_abrev']] ?? null,
+            ],
+            array_values(array_filter(
+                $this->proximites($groupeId),
+                static fn (array $ligne) => $ligne['libelle_abrev'] !== self::NON_INSCRITS,
+            )),
+        );
+
+        $coalitions = $this->coalitions($groupeId, $legislature);
+        $comportement = $this->comportement($groupeId);
+        $moyennes = [
+            'age' => $this->moyennes->ageMoyen($legislature),
+            'feminisation' => $this->moyennes->feminisation($legislature),
+        ] + $this->moyennes->comportementMoyen($legislature);
+        $origineSociale = $this->origineSociale($groupeId, $chiffres['effectif']);
+
+        // La carte « proximité avec la majorité » ne s'affiche que s'il existe
+        // un groupe majoritaire déclaré : la 17e législature n'en a plus aucun.
+        $majorite = null;
+        foreach ($proximites as $ligne) {
+            if ($ligne['position_politique'] === self::POSITION_MAJORITAIRE) {
+                $majorite = $ligne;
+                break;
+            }
+        }
 
         $response = $this->render('groupe/individual.html.twig', [
             'groupe' => $groupe,
-            'chiffres' => $this->chiffres($membres),
-            'comportement' => $this->comportement($groupeId),
+            'chiffres' => $chiffres,
+            'comportement' => $comportement,
+            'legislature_courante' => Legislature::COURANTE,
+            'mois_creation' => $this->moisEtAnnee($groupe['date_debut']),
+            'majorite' => $majorite,
+            'cohesion_edito' => EditoGroupe::cohesion($comportement['cohesion_moyenne'], $moyennes['cohesion']),
+            'comparatifs' => [
+                'age' => EditoGroupe::comparatif($chiffres['age_moyen'], $moyennes['age']),
+                'feminisation' => EditoGroupe::comparatif($chiffres['feminisation'], $moyennes['feminisation']),
+                'participation' => EditoGroupe::comparatif($comportement['participation_moyenne'], $moyennes['participation']),
+                'origine_sociale' => $origineSociale === null
+                    ? 'autant'
+                    : EditoGroupe::comparatif((float) $origineSociale['pct'], round($origineSociale['population'])),
+            ],
             'derniers_votes' => $this->derniersVotes($groupeId),
-            'membres' => $membres,
+            'membres' => $composition['membres'],
+            'apparentes' => $composition['apparentes'],
             'president' => $presidences[0] ?? null,
             'presidences' => $presidences,
             'historique' => $this->historique($groupe['uid'], $groupeId),
             'soutien' => $soutien,
             'soutien_groupes' => $comparatif,
+            'edito' => [
+                'creation' => EditoGroupe::creation($sigle),
+                'opposition' => EditoGroupe::opposition($groupe['position_politique']),
+            ],
+            'echiquier' => ComportementDepute::ECHIQUIER[$sigle] ?? null,
+            'moyennes' => $moyennes,
+            'rang' => $this->moyennes->rangParEffectif($groupeId, $legislature),
+            'sieges' => MoyennesAssemblee::SIEGES,
+            'origine_sociale' => $origineSociale,
+            'proximites' => $proximites,
+            'coalitions' => $coalitions,
+            // La lecture en blocs politiques n'est établie que pour la 17e
+            // législature : ailleurs, la coalition s'énonce par ses sigles.
+            'coalition_blocs' => $legislature === BlocPolitique::LEGISLATURE && $coalitions !== []
+                ? BlocPolitique::repartis($coalitions[0]['sigles'])
+                : [],
+            'coalitions_couleurs' => $this->couleursParSigle($legislature),
+            'groupes_legislature' => $this->groupesDeLaLegislature($legislature),
             'ogp' => $this->openGraph->pourGroupe($groupe, $groupe['date_fin'] === null),
             'fil_ariane' => $this->filAriane($groupe, avecLegislature: true),
         ]);
@@ -105,9 +216,11 @@ class GroupeController extends AbstractController
         $groupe = $this->groupe($legislature, $abrev);
         $composition = $this->composition($groupe);
 
+        // La présidence vient de `composition()` et non de `presidences()` : la
+        // carte de député réclame département, couleur de groupe et photo, que
+        // l'historique des présidences ne porte pas.
         $response = $this->render('groupe/membres.html.twig', $composition + [
             'groupe' => $groupe,
-            'president' => $this->presidences((int) $groupe['id'])[0] ?? null,
             'fil_ariane' => [...$this->filAriane($groupe, avecLegislature: true),
                 ['nom' => 'Membres', 'url' => $this->generateUrl('groupe_membres', $this->parametresRoute($groupe))],
             ],
@@ -150,12 +263,19 @@ class GroupeController extends AbstractController
                 $categories[$vote['categorie_slug']] = $vote['categorie_name'];
             }
         }
-        asort($categories);
+
+        // Tri par collation française et non par `asort()`, qui compare des
+        // octets : « Économie » y passait après « Sports » (le É d'UTF-8
+        // commence par 0xC3, au-delà de « z ») et « Affaires sociales » avant
+        // « Affaires étrangères ». Le site de référence range les deux à leur
+        // place alphabétique.
+        (new \Collator('fr_FR'))->asort($categories);
 
         $response = $this->render('groupe/votes.html.twig', [
             'groupe' => $groupe,
             'votes' => $votes,
             'categories' => $categories,
+            'effectif' => $this->effectif($groupe),
             'president' => $this->presidences((int) $groupe['id'])[0] ?? null,
             'fil_ariane' => [...$this->filAriane($groupe, avecLegislature: false),
                 ['nom' => 'Votes', 'url' => $this->generateUrl('groupe_votes', $this->parametresRoute($groupe))],
@@ -202,6 +322,7 @@ class GroupeController extends AbstractController
         $response = $this->render('groupe/votes_tous.html.twig', [
             'groupe' => $groupe,
             'votes' => $votes,
+            'effectif' => $this->effectif($groupe),
             'president' => $this->presidences((int) $groupe['id'])[0] ?? null,
             'fil_ariane' => [...$this->filAriane($groupe, avecLegislature: false),
                 ['nom' => 'Votes', 'url' => $this->generateUrl('groupe_votes', $this->parametresRoute($groupe))],
@@ -244,10 +365,72 @@ class GroupeController extends AbstractController
 
         $coalitions = $this->coalitions($groupeId, $legislature);
 
+        $comportement = $this->comportement($groupeId);
+        $composition = $this->composition($groupe);
+        $chiffres = $this->chiffres(array_merge(...array_values($composition)));
+        $actif = $groupe['date_fin'] === null;
+
+        // Chacun de ces repères coûte une agrégation sur `vote_groupe` ou sur
+        // les mandats : ils se calculent une fois, puis servent deux fois — au
+        // chiffre affiché et à la comparaison qui le commente.
+        $moyennes = $this->moyennes->comportementMoyen($legislature) + [
+            'age' => $this->moyennes->ageMoyen($legislature),
+            'feminisation' => $this->moyennes->feminisation($legislature),
+            'majorite' => $this->statistiques->proximiteMajoriteMoyenne($legislature),
+        ];
+
+        // Les classements entre groupes ne valent que pour l'Assemblée du jour :
+        // le site les tait dès que le groupe consulté a disparu, faute de
+        // pouvoir reconstituer l'état des autres groupes à cette date.
+        $classements = $actif && $legislature === Legislature::COURANTE
+            ? $this->statistiques->classements($legislature)
+            : [];
+
+        $famille = $this->statistiques->famille($groupe['uid']);
+        $majoriteParIncarnation = $this->statistiques->proximiteMajorite($famille);
+
+        // Le groupe le plus proche se cherche parmi ceux auxquels il peut
+        // encore se comparer : sur la législature en cours, le site écarte les
+        // groupes dissous, les non-inscrits et ceux qui n'ont pas vingt
+        // scrutins communs — un groupe éphémère à trois votes prendrait sinon
+        // la première place. Sur une législature achevée, tout compte.
+        $retenus = $actif && $legislature === Legislature::COURANTE
+            ? array_values(array_filter($proximites, static fn (array $p) => !$p['dissous']
+                && $p['libelle_abrev'] !== self::NON_INSCRITS
+                && (int) $p['votes'] > 20))
+            : $proximites;
+
         $response = $this->render('groupe/statistiques.html.twig', [
             'groupe' => $groupe,
-            'comportement' => $this->comportement($groupeId),
-            'chiffres' => $this->chiffres(array_merge(...array_values($this->composition($groupe)))),
+            'actif' => $actif,
+            'legislature_courante' => Legislature::COURANTE,
+            'bornes' => $this->statistiques->bornes($legislature),
+            'comportement' => $comportement,
+            'chiffres' => $chiffres,
+            'moyennes' => $moyennes,
+            'edito' => [
+                'participation' => EditoGroupe::comparatif($comportement['participation_moyenne'], $moyennes['participation']),
+                'majorite' => EditoGroupe::comparatif(
+                    isset($majoriteParIncarnation[$groupeId]) ? round($majoriteParIncarnation[$groupeId]['score'] * 100) : null,
+                    $moyennes['majorite'],
+                    egalite: 'aussi',
+                ),
+                // La comparaison porte sur les valeurs à trois décimales, non
+                // sur les deux qu'affiche la phrase : un groupe à 0,926 est dit
+                // « moins soudé » qu'une moyenne de 0,927 tout en affichant le
+                // même 0.93 qu'elle. Déroutant, mais c'est le texte du site.
+                'cohesion' => EditoGroupe::cohesion($comportement['cohesion_moyenne'], $moyennes['cohesion']),
+                'age' => EditoGroupe::comparatif($chiffres['age_moyen'], $moyennes['age']),
+                'feminisation' => EditoGroupe::comparatif($chiffres['feminisation'], $moyennes['feminisation']),
+            ],
+            'histogrammes' => $this->histogrammes($famille, $majoriteParIncarnation, $groupeId),
+            'classements' => $this->classementsDuGroupe($classements, $groupeId, $chiffres),
+            'mensuel' => $this->statistiques->comportementMensuel($groupeId),
+            'majorite_mensuelle' => $this->statistiques->majoriteMensuelle($groupeId, $legislature),
+            'majorite_stat' => $majoriteParIncarnation[$groupeId] ?? ['votes' => 0, 'score' => 0.0],
+            'effectifs_lies' => $this->statistiques->historiqueEffectifs($famille),
+            'famille' => $famille,
+            'groupes_lies' => $this->historique($groupe['uid'], $groupeId),
             'proximites' => $proximites,
             'coalitions' => $coalitions,
             'coalitions_couleurs' => $this->couleursParSigle($legislature),
@@ -259,9 +442,14 @@ class GroupeController extends AbstractController
                 ? BlocPolitique::repartis($coalitions[0]['sigles'])
                 : [],
             'majorite' => $majorite,
-            'plus_proche' => $proximites[0] ?? null,
-            'plus_eloigne' => $proximites !== [] ? end($proximites) : null,
+            'plus_proche' => $retenus[0] ?? null,
+            'plus_eloigne' => $retenus !== [] ? end($retenus) : null,
             'president' => $this->presidences($groupeId)[0] ?? null,
+            // Le pied de page de liens que le site déroule sous chacune des
+            // pages du groupe, statistiques comprises.
+            'membres' => $composition['membres'],
+            'apparentes' => $composition['apparentes'],
+            'groupes_legislature' => $this->groupesDeLaLegislature($legislature),
             'fil_ariane' => [...$this->filAriane($groupe, avecLegislature: false),
                 ['nom' => 'Statistiques', 'url' => $this->generateUrl('groupe_statistiques', $this->parametresRoute($groupe))],
             ],
@@ -271,6 +459,168 @@ class GroupeController extends AbstractController
         $response->setSharedMaxAge(self::CACHE_TTL);
 
         return $response;
+    }
+
+    /**
+     * Les trois histogrammes « sur les dernières législatures » : une barre par
+     * incarnation du groupe, la sienne mise en avant.
+     *
+     * Les valeurs sortent en fractions (0,229 et non 23) : c'est l'échelle
+     * qu'attend le gabarit d'histogramme, qui décide seul de les rendre en
+     * pourcentage ou en score.
+     *
+     * @param list<array<string, mixed>>                 $famille
+     * @param array<int, array{votes: int, score: float}> $majorite
+     *
+     * @return array{participation: list<array<string, mixed>>, cohesion: list<array<string, mixed>>, majorite: list<array<string, mixed>>}
+     */
+    private function histogrammes(array $famille, array $majorite, int $groupeId): array
+    {
+        $ages = $this->statistiques->ageALaFondation($famille);
+        $feminisation = $this->statistiques->feminisationParIncarnation($famille);
+
+        $barres = ['participation' => [], 'cohesion' => [], 'majorite' => [], 'age' => [], 'feminisation' => []];
+
+        foreach ($famille as $incarnation) {
+            $id = (int) $incarnation['id'];
+            $barre = $incarnation + ['courant' => $id === $groupeId];
+
+            if ($incarnation['participation'] !== null) {
+                $barres['participation'][] = $barre + ['valeur' => (float) $incarnation['participation']];
+            }
+            if ($incarnation['cohesion'] !== null) {
+                $barres['cohesion'][] = $barre + ['valeur' => (float) $incarnation['cohesion']];
+            }
+
+            // Un groupe qui *est* la majorité présidentielle sort de sa propre
+            // comparaison : le site retire ces barres avant de tracer, sans quoi
+            // LAREM et RE figureraient à 100 % face à elles-mêmes.
+            if ($incarnation['position_politique'] !== self::POSITION_MAJORITAIRE) {
+                $barres['majorite'][] = $barre + ['valeur' => $majorite[$id]['score'] ?? 0.0];
+            }
+
+            if (isset($ages[$id])) {
+                $barres['age'][] = $barre + ['valeur' => round($ages[$id])];
+            }
+            if (isset($feminisation[$id])) {
+                $barres['feminisation'][] = $barre + ['valeur' => $feminisation[$id]['pct'] / 100];
+            }
+        }
+
+        $histogrammes = [];
+        foreach ($barres as $mesure => $lignes) {
+            $valeurs = array_column($lignes, 'valeur');
+
+            $histogrammes[$mesure] = [
+                'barres' => $lignes,
+                'evolution' => $this->evolution($valeurs),
+                // L'âge est le seul à ne pas tenir dans une échelle de 0 à 1 :
+                // il se rapporte au doyen des incarnations, cinq ans de marge
+                // en plus pour que les barres ne butent pas sur le bord.
+                'maximum' => $mesure === 'age' && $valeurs !== [] ? max($valeurs) + 5 : 1,
+            ];
+        }
+
+        return $histogrammes;
+    }
+
+    /**
+     * « en hausse », « en baisse » ou « stable » : la comparaison des deux
+     * dernières incarnations, telle que la titre le site
+     * (`Groupes_edito::get_evolution_edited()`).
+     *
+     * Elle porte sur les valeurs arrondies au point de pourcentage, celles
+     * qu'affiche l'histogramme : deux barres marquées « 23% » se disent stables
+     * même si leurs valeurs exactes diffèrent au millième.
+     *
+     * @param list<float> $valeurs
+     */
+    private function evolution(array $valeurs): ?string
+    {
+        if (\count($valeurs) < 2) {
+            return null;
+        }
+
+        $derniere = (int) round(end($valeurs) * 100);
+        $precedente = (int) round(prev($valeurs) * 100);
+
+        return match (true) {
+            $derniere > $precedente => 'en hausse',
+            $derniere < $precedente => 'en baisse',
+            default => 'stable',
+        };
+    }
+
+    /**
+     * Les trois classements entre groupes de la législature, chacun trié sur sa
+     * propre mesure, avec le rang qu'y tient le groupe consulté.
+     *
+     * Le rang se lit sur la liste triée plutôt que par une requête à part : les
+     * deux ne pourraient diverger que dans le mauvais sens — un texte annonçant
+     * un rang que le graphique juste au-dessous contredit.
+     *
+     * @param list<array<string, mixed>> $classements
+     * @param array<string, int|null>    $chiffres
+     *
+     * @return array<string, array{lignes: list<array<string, mixed>>, rang: int|null, dernier: bool, maximum: float}>
+     */
+    private function classementsDuGroupe(array $classements, int $groupeId, array $chiffres): array
+    {
+        if ($classements === []) {
+            return [];
+        }
+
+        // Les effectifs arrivent déjà triés ; l'âge et la féminisation se
+        // reclassent sur la valeur non arrondie, ce qui départage deux groupes
+        // que l'affichage montre à égalité. Le site tire ces ex æquo au sort
+        // (`ORDER BY … RAND()`) et change d'ordre à chaque rendu.
+        $mesures = [
+            'effectif' => $classements,
+            'age' => $this->trier($classements, 'age'),
+            'feminisation' => $this->trier($classements, 'feminisation'),
+        ];
+
+        $resultat = [];
+        foreach ($mesures as $mesure => $lignes) {
+            $rang = null;
+            foreach ($lignes as $position => $ligne) {
+                if ((int) $ligne['id'] === $groupeId) {
+                    $rang = $position + 1;
+                }
+            }
+
+            // L'âge s'affiche en années pleines — le site le pré-arrondit dans
+            // sa requête. Le tri, lui, reste sur la valeur exacte : sans quoi
+            // deux groupes montrés à « 55 » se départageraient au hasard.
+            $arrondir = $mesure === 'age';
+
+            $resultat[$mesure] = [
+                'lignes' => array_map(static fn (array $l) => $l + ['valeur' => $arrondir ? round((float) $l[$mesure]) : (float) $l[$mesure]], $lignes),
+                'rang' => $rang,
+                'ordinal' => self::ORDINAUX[$rang] ?? null,
+                'dernier' => $rang !== null && $rang === \count($lignes),
+                'maximum' => $arrondir ? round((float) $lignes[0][$mesure]) : (float) $lignes[0][$mesure],
+            ];
+        }
+
+        // L'échelle de l'âge se desserre de cinq ans au-delà du doyen : sans
+        // cette marge, la barre de tête occuperait toute la largeur et les
+        // écarts entre groupes — deux ou trois ans — deviendraient illisibles.
+        $resultat['age']['maximum'] += 5;
+
+        return $resultat;
+    }
+
+    /**
+     * @param list<array<string, mixed>> $lignes
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function trier(array $lignes, string $mesure): array
+    {
+        usort($lignes, static fn (array $a, array $b) => [(float) $b[$mesure], $a['libelle']] <=> [(float) $a[$mesure], $b['libelle']]);
+
+        return $lignes;
     }
 
     /**
@@ -371,17 +721,33 @@ class GroupeController extends AbstractController
              WHERE camps.nous = 1
              GROUP BY camps.coalition
              ORDER BY votes DESC
-             LIMIT 8",
+             LIMIT 24",
             ['groupe' => $groupeId, 'legislature' => $legislature, 'non_inscrits' => self::NON_INSCRITS],
         );
 
-        return array_map(
-            static fn (array $ligne) => [
-                'sigles' => explode('|', (string) $ligne['coalition']),
-                'votes' => (int) $ligne['votes'],
-            ],
-            $lignes,
-        );
+        // Un groupe rebaptisé en cours de législature — UDR devenu UDDPLR —
+        // produirait deux signatures pour une seule et même coalition, et la
+        // scinderait en deux lignes moitié moins fréquentes. Recollage sur le
+        // sigle du successeur, borné à la seule filiation que le site recolle
+        // (cf. SIGLES_CANONIQUES) ; UDR et UDDPLR ne coexistent sur aucun
+        // scrutin, la substitution ne peut donc pas faire apparaître deux fois
+        // le même sigle dans une coalition.
+        $coalitions = [];
+        foreach ($lignes as $ligne) {
+            $sigles = array_map(
+                static fn (string $sigle) => self::SIGLES_CANONIQUES[$sigle] ?? $sigle,
+                explode('|', (string) $ligne['coalition']),
+            );
+            sort($sigles);
+
+            $cle = implode('|', $sigles);
+            $coalitions[$cle] ??= ['sigles' => $sigles, 'votes' => 0];
+            $coalitions[$cle]['votes'] += (int) $ligne['votes'];
+        }
+
+        usort($coalitions, static fn (array $a, array $b) => $b['votes'] <=> $a['votes']);
+
+        return $coalitions;
     }
 
     /**
@@ -480,6 +846,99 @@ class GroupeController extends AbstractController
     }
 
     /**
+     * « juillet 2024 » : le mois de création tel que l'écrit la phrase de
+     * présentation du groupe (`strftime('%B %Y')` du site de référence).
+     */
+    private function moisEtAnnee(?string $date): string
+    {
+        if ($date === null || $date === '') {
+            return '';
+        }
+
+        $jour = new \DateTimeImmutable($date);
+
+        // Retire le quantième que rend `date_fr` : « 18 juillet 2024 » → « juillet 2024 ».
+        return preg_replace('/^\d+\s+/', '', $this->datan->dateFr($jour)) ?? '';
+    }
+
+    /**
+     * Une famille socio-professionnelle tirée au sort, et la part des membres
+     * du groupe qui en relèvent.
+     *
+     * Le tirage est bien celui de l'application d'origine (`ORDER BY rand()` de
+     * `Jobs_model::get_group_category_random()`) : la carte montre à chaque
+     * passage une facette différente du groupe plutôt que toujours la même. Le
+     * cache HTTP le fige pour la durée de vie de la page, comme le cache de
+     * trois jours du site de référence.
+     *
+     * @return array{famille: string, n: int, pct: int, population: float}|null
+     */
+    private function origineSociale(int $groupeId, int $effectif): ?array
+    {
+        if ($effectif === 0) {
+            return null;
+        }
+
+        $population = FamilleSocioPro::population();
+        $famille = array_rand($population);
+
+        $n = (int) $this->connection->fetchOne(
+            'SELECT COUNT(*)
+             FROM fonction_groupe fg
+             JOIN profil_social ps ON ps.depute_id = fg.depute_id
+             WHERE fg.groupe_id = :groupe AND fg.nomin_principale = 1 AND fg.date_fin IS NULL
+               AND ps.fam_soc_pro = :famille',
+            ['groupe' => $groupeId, 'famille' => $famille],
+        );
+
+        return [
+            'famille' => $famille,
+            'n' => $n,
+            'pct' => (int) round($n / $effectif * 100),
+            'population' => $population[$famille],
+        ];
+    }
+
+    /**
+     * Les groupes de la législature, pour le pied de page de la fiche : ceux
+     * encore en activité sur la législature courante, tous sur une passée.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function groupesDeLaLegislature(int $legislature): array
+    {
+        $courante = $legislature === Legislature::COURANTE;
+
+        // La législature en cours se range par effectif décroissant, du plus
+        // gros groupe au plus petit ; une législature passée, par ordre
+        // alphabétique — l'effectif d'un groupe dissous n'ayant plus de sens.
+        // Ce sont les deux branches de `Groupes_model::get_groupes_all()`.
+        return $this->connection->fetchAllAssociative(
+            'SELECT g.legislature, g.libelle, g.libelle_abrev,
+                    COUNT(DISTINCT fg.depute_id) AS effectif
+             FROM groupe g
+             LEFT JOIN fonction_groupe fg ON fg.groupe_id = g.id
+                                         AND fg.nomin_principale = 1 AND fg.date_fin IS NULL
+             WHERE g.legislature = :legislature AND g.libelle_abrev <> :ni'
+                . ($courante ? ' AND g.date_fin IS NULL' : '') . '
+             GROUP BY g.id
+             ORDER BY ' . ($courante ? 'effectif DESC, ' : '') . 'g.libelle',
+            ['legislature' => $legislature, 'ni' => self::NON_INSCRITS],
+        );
+    }
+
+    /**
+     * Effectif du groupe, présidence comprise — celui qu'annonce la carte
+     * d'identité sur toutes les pages du groupe.
+     *
+     * @param array<string, mixed> $groupe
+     */
+    private function effectif(array $groupe): int
+    {
+        return \count(array_merge(...array_values($this->composition($groupe))));
+    }
+
+    /**
      * Effectif, âge moyen et taux de féminisation du groupe.
      *
      * Comptés sur la composition déjà chargée plutôt que par une requête sur
@@ -537,14 +996,19 @@ class GroupeController extends AbstractController
     private function derniersVotes(int $groupeId): array
     {
         return $this->connection->fetchAllAssociative(
+            // `position` est le nom qu'attend la carte de vote, partagée avec la
+            // page des votes du groupe ; `l.name` y imprime la lecture.
             'SELECT dcr.title, dcr.legislature, dcr.vote_numero, c.name AS categorie_name,
+                    l.name AS lecture_name,
                     s.sort_code, s.date_scrutin,
-                    vg.position_majoritaire, vg.nombre_pours, vg.nombre_contres, vg.nombre_abstentions,
+                    vg.position_majoritaire AS position,
+                    vg.nombre_pours, vg.nombre_contres, vg.nombre_abstentions,
                     ROUND(' . self::COHESION_SQL . ', 3) AS cohesion
              FROM decryptage dcr
              JOIN scrutin s ON s.id = dcr.scrutin_id
              JOIN vote_groupe vg ON vg.scrutin_id = s.id AND vg.groupe_id = :groupe
              LEFT JOIN categorie c ON c.id = dcr.categorie_id
+             LEFT JOIN lecture l ON l.id = dcr.lecture_id
              WHERE dcr.state = :published
              ORDER BY s.date_scrutin DESC
              LIMIT 6',
@@ -642,80 +1106,6 @@ class GroupeController extends AbstractController
     }
 
     /**
-     * Le même décompte pour tous les groupes de la législature, qui alimente le
-     * graphique comparatif. Les non-inscrits en sont exclus : ils ne forment pas
-     * un groupe et leur position majoritaire n'engage personne.
-     *
-     * Les groupes d'une même famille sont fusionnés sous celui qui est encore en
-     * exercice, faute de quoi une scission ferait disparaître les votes du
-     * groupe dissous.
-     *
-     * @return list<array<string, mixed>>
-     */
-    private function soutienTousGroupes(int $legislature): array
-    {
-        $lignes = $this->connection->fetchAllAssociative(
-            'SELECT g.id, g.uid, g.libelle, g.libelle_abrev, g.couleur, g.date_fin,
-                    COUNT(*) AS votes,
-                    SUM(vg.position_majoritaire = :pour) AS soutiens,
-                    (SELECT COUNT(*) FROM depute dep WHERE dep.groupe_id = g.id) AS effectif
-             FROM groupe g
-             JOIN vote_groupe vg ON vg.groupe_id = g.id
-             JOIN scrutin s ON s.id = vg.scrutin_id
-             JOIN dossier d ON d.id = s.dossier_id
-             WHERE g.legislature = :legislature AND g.libelle_abrev <> :ni
-               AND s.nature_vote = :finale AND d.procedure_code IN (:procedures)
-             GROUP BY g.id, g.uid, g.libelle, g.libelle_abrev, g.couleur, g.date_fin',
-            [
-                'legislature' => $legislature,
-                'ni' => self::NON_INSCRITS,
-                'pour' => self::POSITION_POUR,
-                'finale' => NatureVote::FINALE,
-                'procedures' => Dossier::PROCEDURES_GOUVERNEMENT,
-            ],
-            ['procedures' => ArrayParameterType::INTEGER],
-        );
-
-        foreach ($lignes as $i => $ligne) {
-            foreach (['votes', 'soutiens', 'effectif'] as $compteur) {
-                $lignes[$i][$compteur] = (int) $ligne[$compteur];
-            }
-        }
-
-        $parUid = array_column($lignes, null, 'uid');
-
-        foreach ($lignes as $ligne) {
-            $famille = array_intersect(FamilleGroupe::pour($ligne['uid']), array_keys($parUid));
-            if (\count($famille) < 2) {
-                continue;
-            }
-
-            // Le représentant est le groupe encore en exercice ; à défaut, le premier trouvé.
-            $representant = null;
-            foreach ($famille as $uid) {
-                if ($parUid[$uid]['date_fin'] === null) {
-                    $representant = $uid;
-                    break;
-                }
-            }
-            $representant ??= reset($famille);
-
-            foreach ($famille as $uid) {
-                if ($uid !== $representant) {
-                    $parUid[$representant]['soutiens'] += $parUid[$uid]['soutiens'];
-                    $parUid[$representant]['votes'] += $parUid[$uid]['votes'];
-                    unset($parUid[$uid]);
-                }
-            }
-        }
-
-        $groupes = array_values($parUid);
-        usort($groupes, static fn (array $a, array $b) => [$b['soutiens'], $b['effectif']] <=> [$a['soutiens'], $a['effectif']]);
-
-        return $groupes;
-    }
-
-    /**
      * Les députés rattachés au groupe, séparés en membres de plein droit et
      * apparentés.
      *
@@ -729,16 +1119,30 @@ class GroupeController extends AbstractController
      * 17e législature portent un second rattachement ouvert, et sans ce filtre
      * ils apparaîtraient dans deux groupes à la fois.
      *
+     * La présidence forme une troisième liste : l'application d'origine la
+     * distingue par la préséance du mandat (`preseance IN (20, 28)` pour les
+     * membres, `24` pour les apparentés — le président n'a ni l'une ni
+     * l'autre), et l'affiche seule au-dessus des membres. `code_qualite`
+     * opère ici le même partage. Le président reste compté dans l'effectif.
+     *
      * @param array<string, mixed> $groupe
      *
-     * @return array{membres: list<array<string, mixed>>, apparentes: list<array<string, mixed>>}
+     * @return array{presidents: list<array<string, mixed>>, membres: list<array<string, mixed>>, apparentes: list<array<string, mixed>>}
      */
     private function composition(array $groupe): array
     {
         $clos = $groupe['date_fin'] !== null;
 
+        // L'âge s'apprécie à la clôture d'une législature achevée et non
+        // aujourd'hui : `depute.age` vieillirait d'autant une assemblée
+        // dissoute depuis des années, et le site de référence annonce bien
+        // « lors de la fin de la 16ème législature ».
+        $reference = $this->moyennes->dateDeReference((int) $groupe['legislature']);
+        $age = $reference === null ? 'CURRENT_DATE' : ':reference';
+
         $lignes = $this->connection->fetchAllAssociative(
-            'SELECT d.mp_id, d.firstname, d.lastname, d.slug, d.dpt_slug, d.civilite, d.age,
+            'SELECT d.mp_id, d.firstname, d.lastname, d.slug, d.dpt_slug, d.civilite,
+                    TIMESTAMPDIFF(YEAR, d.date_naissance, ' . $age . ') AS age,
                     d.departement_nom, d.departement_code, d.circonscription,
                     appartenance.code_qualite,
                     g.libelle AS groupe_libelle, g.libelle_abrev AS groupe_abrev,
@@ -757,20 +1161,23 @@ class GroupeController extends AbstractController
                         FROM mandat GROUP BY depute_id) dl ON dl.depute_id = d.id
              WHERE appartenance.rang = 1
              ORDER BY d.lastname, d.firstname',
-            ['groupe' => (int) $groupe['id']] + ($clos ? ['fin' => $groupe['date_fin']] : []),
+            ['groupe' => (int) $groupe['id']]
+                + ($clos ? ['fin' => $groupe['date_fin']] : [])
+                + ($reference === null ? [] : ['reference' => $reference]),
         );
 
+        $presidents = [];
         $membres = [];
         $apparentes = [];
 
         foreach ($lignes as $ligne) {
-            if ($ligne['code_qualite'] === FonctionGroupe::QUALITE_APPARENTE) {
-                $apparentes[] = $ligne;
-            } else {
-                $membres[] = $ligne;
-            }
+            match ($ligne['code_qualite']) {
+                FonctionGroupe::QUALITE_PRESIDENT => $presidents[] = $ligne,
+                FonctionGroupe::QUALITE_APPARENTE => $apparentes[] = $ligne,
+                default => $membres[] = $ligne,
+            };
         }
 
-        return ['membres' => $membres, 'apparentes' => $apparentes];
+        return ['presidents' => $presidents, 'membres' => $membres, 'apparentes' => $apparentes];
     }
 }

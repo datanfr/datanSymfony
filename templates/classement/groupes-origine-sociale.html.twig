@@ -22,7 +22,15 @@
       <p>Cet indicateur compare le pourcentage de députés issus des différentes catégories professionnelles avec le pourcentage de la population dans ces mêmes catégories.</p>
       <p>Un groupe politique est parfaitement représentatif si 15% de ces députés étaient des ouvriers et qu'il y a 15% d'ouvriers dans la population, et ainsi de suite. Un groupe parfaitement représentatif aura une valeur de 1, tandis qu'un groupe non représentatif aura une valeur de 0.</p>
       {% if groupes %}
-        <p>Le groupe politique de l'Assemblée nationale le plus représentatif socialement de la population est <a href="{{ path('groupe_individual', {legislature: plus_representatif.legislature, abrev: plus_representatif.libelle_abrev|lower}) }}">{{ plus_representatif.libelle|name_group }} ({{ plus_representatif.libelle_abrev }})</a>, avec un score de {{ plus_representatif.score|number_format(3, ',', ' ') }}.</p>
+        {# Seule page du site à donner le nom des groupes en entier : la vue
+           d'origine écrit `libelle` sans passer par `name_group`, ici comme
+           dans le tableau plus bas (`groupes-origine-sociale.php`, lignes 19
+           et 44), et sort donc « La France insoumise - Nouveau Front
+           Populaire » quand la carte, douze lignes plus bas, abrège en
+           « - NFP » — et quand les huit autres classements abrègent partout.
+           Reproduit tel quel : le nom long n'est pas faux, et c'est ce que le
+           site affiche. #}
+        <p>Le groupe politique de l'Assemblée nationale le plus représentatif socialement de la population est <a href="{{ path('groupe_individual', {legislature: plus_representatif.legislature, abrev: plus_representatif.libelle_abrev|lower}) }}">{{ plus_representatif.libelle }} ({{ plus_representatif.libelle_abrev }})</a>, avec un score de {{ plus_representatif.score|number_format(3, ',', ' ') }}.</p>
       {% else %}
         <div class="alert alert-danger mt-4" role="alert">
           Ces données seront prochainement disponibles.
@@ -47,7 +55,7 @@
           <tbody>
             {% for groupe in groupes %}
               <tr>
-                <td class="text-center">{{ groupe.libelle|name_group }} ({{ groupe.libelle_abrev }})</td>
+                <td class="text-center">{{ groupe.libelle }} ({{ groupe.libelle_abrev }})</td>
                 <td class="text-center">{{ groupe.effectif }}</td>
                 <td class="text-center">{{ groupe.score|number_format(3, ',', ' ') }}</td>
               </tr>

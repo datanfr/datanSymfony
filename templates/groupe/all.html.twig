@@ -48,12 +48,17 @@
         </div>
         <div class="col-md-3 offset-md-1">
           <h2 class="history">{{ courante ? 'Historique' : 'Toutes les législatures' }}</h2>
-          <p>La législature actuelle est la {{ legislature_courante }}<sup>ème</sup> législature. Elle a débuté en 2024, à la suite des élections législatives, et se terminera en 2029.</p>
+          <p>La législature actuelle est la {{ legislature_courante }}<sup>ème</sup> législature. Elle a débuté en 2024, à la suite des <a href="{{ path('elections_individual', {slug: 'legislatives-2024'}) }}">élections législatives</a>, et se terminera en 2029.</p>
           <p>Découvrez les groupes {{ courante ? 'des législatures précédentes' : 'de toutes les législatures' }}.</p>
           <div class="d-flex flex-wrap">
+            {# Le site de référence n'écarte que le bouton de la législature en
+               cours, et seulement quand on la consulte : sur une législature
+               passée il affiche les quatre, y compris celui qui renvoie à la
+               page où l'on se trouve déjà. Écarter ici « n == legislature »
+               ferait disparaître un bouton de la barre. #}
             {% for n in legislatures %}
-              {% if n != legislature %}
-                <a href="{{ n == legislature_courante ? path('groupes_index') : path('groupes_legislature', {legislature: n}) }}" class="btn btn-secondary my-2 mx-2">{{ n }}<sup>ème</sup> législature</a>
+              {% if n != legislature_courante or not courante %}
+                <a href="{{ n == legislature_courante ? path('groupes_index') : path('groupes_legislature', {legislature: n}) }}" class="btn btn-secondary my-2">{{ n }}<sup>ème</sup> législature</a>
               {% endif %}
             {% endfor %}
           </div>

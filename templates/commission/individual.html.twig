@@ -43,7 +43,11 @@
         {% for depute in bureau %}
           <div class="d-flex flex-column align-items-center">
             {{ include('depute/partials/card.html.twig') }}
-            <span class="badge badge-stats my-2">{{ depute.libelle_qualite ?: depute.code_qualite }}</span>
+            {# `badge-stats` ne porte ses couleurs que sous `.card-depute`
+               (`main.css` le cible ainsi) : posé sous la carte, il sortait sans
+               fond et le texte se perdait en clair sur clair. `badge-primary`
+               pose les deux, comme la carte de groupe des classements. #}
+            <span class="badge badge-primary badge-stats my-2">{{ depute.libelle_qualite ?: depute.code_qualite }}</span>
           </div>
         {% endfor %}
       </div>

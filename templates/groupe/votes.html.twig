@@ -13,8 +13,9 @@
 
 <div class="container pg-groupe-votes">
   <div class="row">
-    <div class="col-lg-4 d-none d-lg-block">
-      <div class="sticky-top mt-5" style="top: 125px">
+    <div class="col-12 col-md-8 col-lg-4 offset-md-2 offset-lg-0 px-lg-4">
+      {{ include('groupe/partials/carte_profil.html.twig') }}
+      <div class="mt-4 d-none d-lg-block">
         <div class="card">
           <div class="card-body badges-filter px-4 py-3">
             <span class="title">Filtrer par catégorie</span>
@@ -42,7 +43,7 @@
 
     <div class="col-md-10 col-lg-8 offset-md-1 offset-lg-0 pl-lg-5 bloc-votes-datan">
       <div class="d-none d-lg-block btn-back mt-4">
-        <a class="btn btn-outline-primary mx-2" href="{{ profil }}">Retour profil</a>
+        <a class="btn btn-outline-primary mx-2" href="{{ profil }}">{{ include('groupe/partials/fleche_retour.html.twig') }}Retour profil</a>
       </div>
       <h1 class="mb-4 mt-4">Les votes {{ non_inscrits ? 'des députés non inscrits' : 'du groupe ' ~ nom_groupe }}</h1>
       <p>

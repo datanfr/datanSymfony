@@ -43,4 +43,22 @@ enum TypeClassement: string
     {
         return str_starts_with($this->value, 'groupes_');
     }
+
+    /**
+     * Précision à laquelle le score se compare pour départager les rangs.
+     *
+     * L'application d'origine ne range pas ses scores à la même finesse selon le
+     * classement : `class_participation` et `class_participation_solennels`
+     * gardent `ROUND(AVG(participation), 2)`, `class_loyaute` un
+     * `ROUND(…, 3)`. Comme le `RANK()` porte sur la colonne stockée, c'est cette
+     * précision-là qui décide des ex æquo affichés — et deux députés séparés au
+     * millième se retrouvent au même rang sur la page de participation.
+     */
+    public function decimalesDuScore(): int
+    {
+        return match ($this) {
+            self::DeputesParticipation, self::DeputesParticipationTous => 2,
+            default => 3,
+        };
+    }
 }

@@ -13,7 +13,8 @@ use Twig\TwigFunction;
  */
 class DatanExtension extends AbstractExtension
 {
-    private const MOIS = [
+    /** Public : les contrôleurs qui composent une date française l'empruntent. */
+    public const MOIS = [
         1 => 'janvier', 2 => 'février', 3 => 'mars', 4 => 'avril',
         5 => 'mai', 6 => 'juin', 7 => 'juillet', 8 => 'août',
         9 => 'septembre', 10 => 'octobre', 11 => 'novembre', 12 => 'décembre',

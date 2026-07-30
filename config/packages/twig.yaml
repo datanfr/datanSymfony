@@ -1,5 +1,9 @@
 twig:
     file_name_pattern: '*.twig'
+    # Espace @public : permet d'inliner un asset (carte de France en SVG) via
+    # source('@public/…'), comme les file_get_contents() du legacy.
+    paths:
+        '%kernel.project_dir%/public': public
     globals:
         # Pile de suivi de base.html.twig. Vides, les blocs correspondants ne
         # sont pas rendus : un poste de développement ne pollue jamais les

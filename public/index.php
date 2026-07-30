@@ -1,7 +1,7 @@
 <?php
 
+use App\Http\CacheAvecSession;
 use App\Kernel;
-use Symfony\Bundle\FrameworkBundle\HttpCache\HttpCache;
 
 require_once dirname(__DIR__).'/vendor/autoload_runtime.php';
 
@@ -12,8 +12,10 @@ return function (array $context) {
     // le vote passé (voir VoteController::CACHE_TTL). Le reverse proxy intégré
     // les sert alors sans réexécuter le rendu. En production, un cache HTTP en
     // amont (Varnish, CDN) prend naturellement le relais grâce aux mêmes en-têtes.
+    // CacheAvecSession et non HttpCache : un connecté (cookie de session) passe
+    // outre le magasin, sans quoi il verrait la navbar anonyme déjà en cache.
     if (!$kernel->isDebug()) {
-        return new HttpCache($kernel);
+        return new CacheAvecSession($kernel);
     }
 
     return $kernel;

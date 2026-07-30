@@ -1,163 +1,73 @@
 {% extends 'base.html.twig' %}
 
+{# Page « historique » d'un mandat passé (`deputes/individual.php` en mode
+   `page_history`) : même coque que la fiche — carte de profil sticky, bio en
+   mode historique, élection du mandat, historique des mandats, partage, réseaux
+   sociaux, contact.
+
+   Le bloc « Son comportement politique » de datan.fr (participation, loyauté,
+   proximités de la législature consultée) n'est PAS rendu : les votes
+   nominatifs ne couvrent que la 17e législature (cf. CLAUDE.md) — une page qui
+   compte des votes individuels sur une législature passée se tait plutôt que
+   d'afficher zéro. #}
+
 {% set nom_complet = depute.firstname ~ ' ' ~ depute.lastname %}
 {% set femme = depute.civilite == 'Mme' %}
 {% set e = femme ? 'e' : '' %}
-{% set couleur = groupe ? groupe.couleur : '#00668e' %}
 
-{% block title %}{{ nom_complet }} - {{ legislature }}<sup>e</sup> législature - Datan{% endblock %}
+{# La carte porte le groupe de l'époque, pas celui d'aujourd'hui. #}
+{% set depute_carte = depute|merge({
+  groupe_libelle: groupe ? groupe.libelle : null,
+  groupe_abrev: groupe ? groupe.libelle_abrev : null,
+  groupe_couleur: groupe ? groupe.couleur : null,
+}) %}
 
-{% block meta_description %}{{ nom_complet }}, député{{ e }} pendant la {{ legislature }}e législature{{ groupe ? ' au sein du groupe ' ~ (groupe.libelle|name_group) : '' }} : participation, loyauté et votes.{% endblock %}
+{# Titre et description du legacy (`get_mp_page_resources`, type « history »). #}
+{% block title %}{{ nom_complet }} - Historique {{ legislature }}ème législature | Datan{% endblock %}
+
+{% block meta_description %}Découvrez l'historique {{ femme ? 'de la' : 'du' }} député{{ e }} {{ nom_complet }} pour la {{ legislature }}ème législature : taux de participation, loyauté avec son groupe, proximité avec la majorité présidentielle.{% endblock %}
 
 {% block body %}
 <div class="container-fluid bloc-img-deputes async_background" id="container-always-fluid" style="height: 13em"></div>
-<div class="container pg-depute-individual mb-5">
+{% if groupe and groupe.couleur %}
+  <div class="liseret-groupe" style="background-color: {{ groupe.couleur }}"></div>
+{% endif %}
+<div class="container pg-depute-individual">
   <div class="row">
-    <div class="col-lg-4 col-md-5 col-12">
-      <div class="card card-profile">
-        <div class="card-body">
-          <div class="d-flex justify-content-center">
-            <div class="depute-img-circle">
-              <img src="{{ photo_depute(depute) }}" width="150" height="192" alt="{{ nom_complet }}">
-            </div>
-          </div>
-          <div class="bloc-infos">
-            <h1 class="title d-block text-center">{{ nom_complet }}</h1>
-            {% if groupe %}
-              <div class="link-group text-center mt-1">
-                <a href="{{ path('groupe_individual', {legislature: groupe.legislature, abrev: groupe.libelle_abrev|lower}) }}"
-                   style="color: {{ couleur }}; --color-group: {{ couleur }}">{{ groupe.libelle|name_group }}</a>
-              </div>
-            {% endif %}
-          </div>
-          <div class="bloc-bref mt-3 d-flex justify-content-center justify-content-lg-start">
-            <ul>
-              <li class="first">
-                <div class="value">{{ legislature }}<sup>e</sup> législature</div>
-              </li>
-              {% if mandat.departement_nom %}
-                <li>
-                  <div class="value">
-                    {{ mandat.departement_nom }} ({{ mandat.departement_code }}){% if mandat.circonscription %} — {{ mandat.circonscription }}<sup>{{ mandat.circonscription|rang_circo }}</sup> circonscription{% endif %}
-                  </div>
-                </li>
-              {% endif %}
-              <li>
-                <div class="value">
-                  Du {{ mandat.date_debut|date('d/m/Y') }}{{ mandat.date_fin ? ' au ' ~ mandat.date_fin|date('d/m/Y') : '' }}
-                </div>
-              </li>
-              {% if mandat.cause_mandat %}
-                <li class="mb-0">
-                  <div class="value">{{ mandat.cause_mandat }}</div>
-                </li>
-              {% endif %}
-            </ul>
-          </div>
-          <div class="text-center mt-2">
-            <a class="btn btn-outline-primary" href="{{ path('depute_individual', {dptSlug: depute.dpt_slug, slug: depute.slug}) }}">Voir sa fiche actuelle</a>
-          </div>
-        </div>
+    <div class="col-12 col-md-8 col-lg-4 offset-md-2 offset-lg-0">
+      <div class="sticky-top" style="margin-top: -150px; top: 80px;">
+        {{ include('depute/_carte_profil.html.twig', {
+          depute: depute_carte,
+          balise_titre: 'span',
+          carte_historique: true,
+          legislature_carte: legislature,
+        }) }}
       </div>
     </div>
 
-    <div class="col-lg-8 col-md-7 col-12">
-      <div class="mt-5 mt-md-0">
-        <h2>Son mandat en {{ legislature }}<sup>e</sup> législature</h2>
-        <div class="card mt-4">
-          <div class="card-body">
-            <p class="mb-0">
-              {{ nom_complet }} a été député{{ e }}
-              {% if mandat.circonscription %}de la {{ mandat.circonscription }}<sup>{{ mandat.circonscription|rang_circo }}</sup> circonscription{% endif %}
-              {% if mandat.departement_nom %}{{ mandat.circonscription ? 'du département ' : 'de ' }}{{ mandat.departement_nom }} ({{ mandat.departement_code }}){% endif %}
-              pendant la {{ legislature }}<sup>e</sup> législature{% if groupe %}, au sein du groupe {{ groupe.libelle|name_group }}{% endif %}.
-            </p>
-          </div>
-        </div>
-      </div>
+    <div class="col-md-10 col-lg-8 offset-md-1 offset-lg-0 pl-lg-5">
+      {{ include('depute/_bio.html.twig', {
+        page_historique: true,
+        legislature_page: legislature,
+        groupe_historique: groupe,
+      }) }}
 
-      <div class="mt-5">
-        <h2>Son comportement de vote</h2>
-        <div class="row mt-4">
-          <div class="col-md-6 mb-3">
-            <div class="card h-100">
-              <div class="card-body text-center">
-                <h3 class="subtitle">Taux de participation</h3>
-                {% if participation.taux is not null %}
-                  <p class="display-4 mb-1" style="color: {{ couleur }}">{{ participation.taux }} %</p>
-                  <p class="mb-0 small">{{ participation.exprimes }} votes exprimés sur {{ participation.total }} scrutins solennels</p>
-                {% else %}
-                  <p class="mb-0">Aucun vote solennel enregistré pour cette législature.</p>
-                {% endif %}
-              </div>
-            </div>
-          </div>
-          <div class="col-md-6 mb-3">
-            <div class="card h-100">
-              <div class="card-body text-center">
-                <h3 class="subtitle">Taux de loyauté</h3>
-                {% if loyaute and loyaute.taux is not null %}
-                  <p class="display-4 mb-1" style="color: {{ couleur }}">{{ loyaute.taux }} %</p>
-                  <p class="mb-0 small">{{ loyaute.conformes }} votes conformes à la position de son groupe sur {{ loyaute.total }}</p>
-                {% else %}
-                  <p class="mb-0">Taux indisponible : aucun groupe connu pour cette législature.</p>
-                {% endif %}
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {% if derniers_votes %}
-        <div class="mt-5">
-          <h2>Ses derniers votes de la législature</h2>
-          <table class="table table-striped table-vote-individual mt-4" style="width: 100%">
-            <caption class="sr-only">Derniers votes du député pendant la {{ legislature }}e législature</caption>
-            <thead>
-              <tr>
-                <th scope="col" class="all">Scrutin</th>
-                <th scope="col" class="text-center min-tablet">Date</th>
-                <th scope="col" class="text-center all">Son vote</th>
-                <th scope="col" class="text-center min-tablet">Résultat</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for v in derniers_votes %}
-                <tr>
-                  <td class="name">
-                    <a class="no-decoration underline" href="{{ path('vote_individual', {legislature: v.legislature, numero: v.numero}) }}">{{ v.decryptage_title ?: v.titre }}</a>
-                  </td>
-                  <td class="text-center">{{ v.scrutin_date ? v.scrutin_date|date('d/m/Y') : '' }}</td>
-                  <td class="text-center vote sort-{{ v.position }}">{{ v.position == 'nonVotant' ? 'NON VOTANT' : v.position|upper }}</td>
-                  <td class="text-center sort-{{ v.sort_code }}">{{ v.sort_code|upper }}</td>
-                </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
+      {% if election %}
+        {# L'élection du mandat consulté, avec la circonscription de l'époque. #}
+        {{ include('depute/_election.html.twig', {
+          depute: depute|merge({
+            circonscription: mandat.circonscription ?? depute.circonscription,
+            departement_nom: mandat.departement_nom ?? depute.departement_nom,
+            departement_code: mandat.departement_code ?? depute.departement_code,
+          }),
+        }) }}
       {% endif %}
 
-      {% if mandats|length > 1 %}
-        <div class="mt-5">
-          <h2>Ses autres mandats</h2>
-          <ul class="mt-3">
-            {# Un mandat antérieur à la 14e législature se dit sans se lier :
-               le site ne publie rien en deçà, la page répondrait 404. #}
-            {% for m in mandats|filter(m => m.legislature != legislature) %}
-              <li>
-                {% if m.legislature < constant('App\\Legislature::PREMIERE') %}
-                  {{ m.legislature }}<sup>e</sup> législature
-                {% elseif m.legislature == mandats[0].legislature %}
-                  <a class="no-decoration underline" href="{{ path('depute_individual', {dptSlug: depute.dpt_slug, slug: depute.slug}) }}">{{ m.legislature }}<sup>e</sup> législature</a>
-                {% else %}
-                  <a class="no-decoration underline" href="{{ path('depute_legislature', {dptSlug: depute.dpt_slug, slug: depute.slug, legislature: m.legislature}) }}">{{ m.legislature }}<sup>e</sup> législature</a>
-                {% endif %}
-                {% if m.departement_nom %}— {{ m.departement_nom }} ({{ m.departement_code }}){% endif %}
-              </li>
-            {% endfor %}
-          </ul>
-        </div>
-      {% endif %}
+      {{ include('depute/_mandats.html.twig') }}
+
+      {{ include('depute/_partage.html.twig') }}
+
+      {{ include('depute/_reseaux_sociaux.html.twig') }}
     </div>
   </div>
 </div>

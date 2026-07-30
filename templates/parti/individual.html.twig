@@ -89,6 +89,11 @@
         <p>
           <b>{{ parti.libelle }} est un {{ actif ? '' : 'ancien ' }}parti politique français.</b>
         </p>
+        {# Le site de référence referme son `if` trop tôt (`else:` vide suivi de
+           `endif;`) : sur un parti sans député rattaché il empile les deux
+           paragraphes, et le second sort à trou — « Actuellement, député est
+           rattaché », l'effectif nul ne s'imprimant pas. Le voir sur
+           /partis-politiques/modem ; ici les deux cas s'excluent. #}
         {% if parti.effectif == 0 %}
           <p>
             Actuellement, aucun député n'est rattaché financièrement au parti {{ parti.libelle }}. Les députés rattachés ne sont pas des députés membres du parti, même s'ils ont tendance à en être proches d'un point de vue idéologique.

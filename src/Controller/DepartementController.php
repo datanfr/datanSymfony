@@ -44,8 +44,20 @@ class DepartementController extends AbstractController
      *
      * Partagé avec {@see CommuneController}, dont les adresses commencent par le
      * même segment.
+     *
+     * **Les majuscules sont acceptées, puis redirigées.** Le routeur de
+     * l'application d'origine ne regarde pas la casse et sa base non plus : le
+     * site sert donc la même page sous `corse-du-sud-2a`, `corse-du-sud-2A` et
+     * `NORD-59`, toutes en 200. Refuser ces formes rendrait 404 là où le site
+     * répond ; les servir en 200 dupliquerait chaque page sous une infinité
+     * d'adresses. D'où la troisième voie, celle des balises canoniques déjà
+     * corrigées ailleurs : on accepte, et on renvoie en 301 vers la forme de
+     * `departement.slug` ({@see self::versLaCasseCanonique()}). Les exclusions
+     * deviennent insensibles à la casse pour la même raison — sans quoi
+     * `/deputes/Legislature-16` échapperait à celle qui protège
+     * {@see DeputeListController}.
      */
-    public const SLUG = '(?!legislature-)(?!inactifs$)[a-z0-9\-]+';
+    public const SLUG = '(?!(?i:legislature-))(?!(?i:inactifs$))[a-zA-Z0-9\-]+';
 
     /** Un député n'est de ce département que s'il y siège encore. */
     private const EN_EXERCICE = 'EXISTS (SELECT 1 FROM mandat m
@@ -91,6 +103,17 @@ class DepartementController extends AbstractController
             return $this->versLAdresseCanonique($departement);
         }
 
+        // La collation de MariaDB ignore la casse : la requête ci-dessus a donc
+        // pu répondre à `Corse-du-Sud-2A`. C'est ici, et non dans le motif de
+        // route, que la forme non canonique se rattrape.
+        if ($departement !== $ligne['slug']) {
+            return $this->redirectToRoute(
+                'departement_individual',
+                ['departement' => $ligne['slug']],
+                Response::HTTP_MOVED_PERMANENTLY,
+            );
+        }
+
         $deputes = $this->deputes((string) $ligne['code']);
 
         // L'application d'origine rend un 404 sur un département sans député en
@@ -123,11 +146,17 @@ class DepartementController extends AbstractController
     }
 
     /**
-     * Nos propres slugs de département ne sont pas ceux du site : `depute.dpt_slug`
-     * les fabrique à partir du nom et du code, quand la table de l'application
-     * d'origine tient les siens à la main — `francais-de-letranger` et non
-     * `francais-etablis-hors-de-france-099`. Cinq départements diffèrent ; on y
-     * renvoie plutôt que de rendre un 404.
+     * Filet pour un `dpt_slug` fabriqué (repli) qui ne serait pas l'adresse du
+     * site : on renvoie vers `departement.slug`, la table tenue à la main de
+     * l'application d'origine, plutôt que de rendre un 404.
+     *
+     * Les cinq divergences historiques (`francais-de-letranger` et non
+     * `francais-etablis-hors-de-france-099`, `cote-dor-21` et non `cote-d-or-21`,
+     * etc.) sont désormais résorbées **à la source** : `ImportMandatsCommand`
+     * dérive `dpt_slug` de `departement.slug`, si bien que ces anciennes formes
+     * fabriquées ne sont plus produites nulle part et répondent 404 — comme sur
+     * datan.fr, qui ne les a jamais servies. Ce filet ne joue plus que pour le
+     * repli de fabrication (un département absent de la table du legacy).
      */
     private function versLAdresseCanonique(string $slug): Response
     {

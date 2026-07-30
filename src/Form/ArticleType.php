@@ -49,7 +49,9 @@ class ArticleType extends AbstractType
             ])
             ->add('corps', TextareaType::class, [
                 'label' => 'Contenu',
-                'attr' => ['id' => 'editor', 'rows' => 18],
+                // Classe et non id « editor » : en id il ferait doublon avec
+                // l'id du champ et serait supprimé au rendu (init-ckeditor.js).
+                'attr' => ['class' => 'js-ckeditor', 'rows' => 18],
                 'constraints' => [new NotBlank()],
             ])
             // Nom de fichier de l'image de couverture, sous `assets/imgs/posts/`.

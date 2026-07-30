@@ -21,6 +21,17 @@ final class FamilleSocioPro
     public const INACTIFS = 'Personnes n’ayant jamais travaillé (ex étudiants)';
 
     /**
+     * Ce que le site écrit pour les députés qu'aucune famille ne range.
+     *
+     * Ce n'est pas une neuvième famille de l'INSEE : elle n'a pas de poids dans
+     * la population et ne compte pas dans l'indice de Rose. Mais elle pèse
+     * 43 députés sur 577, et le tableau croisé de la page la montre — sans
+     * elle, les colonnes ne totalisent pas 100 % et le lecteur cherche en vain
+     * où sont passés les manquants.
+     */
+    public const SANS_PROFESSION = 'Sans profession déclarée';
+
+    /**
      * Part de chaque famille dans la population française, en pourcentage.
      *
      * @return array<string, float>

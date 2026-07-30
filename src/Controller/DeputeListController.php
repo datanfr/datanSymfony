@@ -14,9 +14,10 @@ use Symfony\Component\Routing\Attribute\Route;
  * Listes de députés (Deputes::index et Deputes::inactifs de l'application
  * CodeIgniter d'origine, vue application/views/deputes/all.php).
  *
- * La page affiche jusqu'à 660 cartes : tout est fait en une requête agrégée,
- * les effectifs par groupe et la répartition hommes/femmes étant déduits en PHP
- * de la liste déjà chargée plutôt que par des requêtes supplémentaires.
+ * La page affiche jusqu'à 660 cartes : les cartes et les effectifs par groupe
+ * tiennent en une seule requête agrégée, les seconds étant déduits en PHP de la
+ * liste déjà chargée. Seule la répartition hommes/femmes en demande une
+ * deuxième — elle ne porte pas sur la population affichée, cf. {@see genres()}.
  */
 class DeputeListController extends AbstractController
 {
@@ -107,7 +108,7 @@ class DeputeListController extends AbstractController
             // Sur la page des anciens députés, l'application d'origine range les
             // filtres par libellé de groupe et non par effectif décroissant.
             'groupes' => $this->effectifs($deputes, $population === PopulationDeputes::Anciens),
-            'genres' => $this->genres($deputes),
+            'genres' => $this->genres($legislature),
             // La page des anciens députés les a déjà tous chargés : inutile de
             // les recompter en base.
             'nombre_inactifs' => $population === PopulationDeputes::Anciens
@@ -240,24 +241,40 @@ class DeputeListController extends AbstractController
     }
 
     /**
-     * Répartition hommes/femmes de la population affichée.
+     * Répartition hommes/femmes annoncée par la page.
      *
-     * @param list<array<string, mixed>> $deputes
+     * Ce n'est **pas** la population des cartes. Sur une législature achevée la
+     * page liste tous ceux qui y ont siégé — 618 pour la 16e — quand la phrase,
+     * elle, parle de l'Assemblée, qui compte 577 sièges. L'application d'origine
+     * compte donc la composition **au jour d'ouverture** de la législature
+     * (`Deputes_model::get_deputes_gender()`, borne sur `datePriseFonction`), et
+     * pour la législature en cours les mandats encore ouverts. Compter les
+     * cartes affichait 380 hommes / 238 femmes là où datan.fr affiche 362 / 215.
+     *
+     * Reste un écart de dix personnes : notre source ne porte que 567 prises de
+     * fonction au 22 juin 2022, là où datan.fr en compte 577. Les proportions,
+     * elles, tombent juste (63 % / 37 %). Voir `TODO.md`.
      *
      * @return array{hommes: int, femmes: int, hommes_pct: int, femmes_pct: int}
      */
-    private function genres(array $deputes): array
+    private function genres(int $legislature): array
     {
-        $hommes = 0;
-        $femmes = 0;
+        $ouverture = Legislature::ouverture($legislature);
 
-        foreach ($deputes as $depute) {
-            match ($depute['civilite']) {
-                'M.' => ++$hommes,
-                'Mme' => ++$femmes,
-                default => null,
-            };
-        }
+        $effectifs = $this->connection->fetchAllKeyValue(
+            'SELECT d.civilite, COUNT(DISTINCT d.id)
+             FROM mandat m
+             JOIN depute d ON d.id = m.depute_id
+             WHERE m.legislature = :legislature
+               AND ' . ($ouverture === null ? 'm.date_fin IS NULL' : 'm.date_prise_fonction = :ouverture') . '
+             GROUP BY d.civilite',
+            $ouverture === null
+                ? ['legislature' => $legislature]
+                : ['legislature' => $legislature, 'ouverture' => $ouverture],
+        );
+
+        $hommes = (int) ($effectifs['M.'] ?? 0);
+        $femmes = (int) ($effectifs['Mme'] ?? 0);
 
         $total = max(1, $hommes + $femmes);
 

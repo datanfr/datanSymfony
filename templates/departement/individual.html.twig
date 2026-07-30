@@ -3,6 +3,12 @@
 {# `libelle_de` porte son espace final quand il en faut un : « des » suivi d'un
    espace, « de l' » sans. Il se concatène donc au nom sans rien ajouter. #}
 {% set nom_article = departement.libelle_de ~ departement.nom %}
+{# Le cas 099 n'ajoute pas le code entre parenthèses : « (099) » ne désigne pas
+   un département, et le site l'écarte déjà (Departement.php:37).
+   Il s'en tient en revanche au seul `libelle_2` et **omet le nom**, si bien que
+   datan.fr titre « Députés de la circonscription des » — une phrase coupée en
+   plein milieu, que son propre sous-titre dément deux lignes plus bas. C'est un
+   défaut, pas une tournure : le nom est rétabli ici. #}
 {% set titre = departement.code == '099'
   ? 'Députés ' ~ nom_article
   : 'Députés ' ~ nom_article ~ ' (' ~ departement.code ~ ')' %}

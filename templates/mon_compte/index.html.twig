@@ -15,7 +15,9 @@
   <div class="container pg-compte p-5" style="margin-top: -100px; top: 100px;">
     <div class="row">
       <div class="col-12">
-        <h1 class="mb-5">Gérer mon compte</h1>
+        {# Le titre de la page porte le pseudo (`'Gérer mon compte - ' . username`),
+           là où l'onglet s'en tient à « Gérer mon compte | Datan ». #}
+        <h1 class="mb-5">Gérer mon compte - {{ app.user.identifiant }}</h1>
         {% for message in app.flashes('succes') %}
           <div class="alert alert-success mb-4 text-center" role="alert">{{ message }}</div>
         {% endfor %}
@@ -29,7 +31,12 @@
             <h2 class="card-title font-weight-bold h5">Mes données personnelles</h2>
             <p class="mb-0">Email : {{ app.user.email }}</p>
             <p class="mb-0">Pseudo : {{ app.user.identifiant }}</p>
+            {# Le site étiquette ce champ « Prénom » alors qu'il porte le nom complet
+               saisi à l'inscription, sous le libellé « Nom » et l'exemple « Jean
+               Dupont » : c'est l'étiquette d'ici qui est fausse, pas la donnée. #}
             <p class="mb-0">Nom : {{ app.user.nom }}</p>
+            {# Seul le lecteur renseigne un code postal ; le site affiche la ligne à
+               tout le monde, vide pour un député comme pour la rédaction. #}
             {% if app.user.estLecteur %}
               <p class="mb-0">Code postal : {{ app.user.codePostal }}</p>
             {% endif %}

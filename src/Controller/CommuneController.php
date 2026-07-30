@@ -88,6 +88,17 @@ class CommuneController extends AbstractController
             throw $this->createNotFoundException('Commune inconnue.');
         }
 
+        // La collation de MariaDB ignore la casse : `Corse-du-Sud-2A/ville_Ajaccio`
+        // a donc trouvé sa ligne. On renvoie sur l'orthographe de la base plutôt
+        // que de servir la même page sous deux adresses ({@see DepartementController::SLUG}).
+        if ($departement !== $ville['dpt_slug'] || $commune !== $ville['slug']) {
+            return $this->redirectToRoute(
+                'commune_individual',
+                ['departement' => $ville['dpt_slug'], 'commune' => $ville['slug']],
+                Response::HTTP_MOVED_PERMANENTLY,
+            );
+        }
+
         $circonscriptions = $this->connection->fetchFirstColumn(
             // Ordre numérique : la colonne de l'application d'origine est du
             // texte, ce qui range les circonscriptions de Paris 1, 10, 11 … 2, 3.

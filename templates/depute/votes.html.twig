@@ -10,30 +10,37 @@
 {% block meta_description %}Découvrez toutes les positions {{ femme ? 'de la' : 'du' }} député{{ e }} {{ nom_complet }} quand {{ femme ? 'elle' : 'il' }} vote à l'Assemblée nationale.{% endblock %}
 
 {% block body %}
-<div class="container-fluid bloc-img-deputes async_background d-flex" id="container-always-fluid" style="height: 13em"></div>
+{# Bandeau : sous lg, le legacy y loge une bannière avec retour, nom, groupe et
+   département (`banner-depute-mobile`) — la carte de profil est cachée. #}
+<div class="container-fluid bloc-img-deputes d-flex async_background" id="container-always-fluid" style="min-height: 13em">
+  <div class="container banner-depute-mobile d-flex d-lg-none flex-column justify-content-center py-2">
+    <div class="row">
+      <div class="col-md-10 offset-md-1">
+        <a class="btn btn-primary text-border mb-2" href="{{ profil }}">
+          <svg width="1em" height="1em" viewBox="0 0 16 16" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" d="M5.854 4.646a.5.5 0 0 1 0 .708L3.207 8l2.647 2.646a.5.5 0 0 1-.708.708l-3-3a.5.5 0 0 1 0-.708l3-3a.5.5 0 0 1 .708 0z"/><path fill-rule="evenodd" d="M2.5 8a.5.5 0 0 1 .5-.5h10.5a.5.5 0 0 1 0 1H3a.5.5 0 0 1-.5-.5z"/></svg>
+          Retour profil
+        </a>
+        <span class="title d-block">{{ nom_complet }}</span>
+        {% if depute.groupe_libelle %}<p class="subtitle">{{ depute.groupe_libelle|name_group }}</p>{% endif %}
+        <p>{{ depute.departement_nom }} ({{ depute.departement_code }})</p>
+      </div>
+    </div>
+  </div>
+</div>
 {% if depute.groupe_couleur %}
   <div class="liseret-groupe" style="background-color: {{ depute.groupe_couleur }}"></div>
 {% endif %}
 
-<div class="container pg-groupe-votes mb-5">
+<div class="container pg-depute-votes">
   <div class="row">
     <div class="col-lg-4 d-none d-lg-block">
+      {# La carte de profil complète, remontée sur le bandeau comme sur la fiche
+         (le legacy la décale de -125px) ; son titre est un span, le h1 de la
+         page étant « Les votes de … ». Les filtres, eux, sont sticky. #}
+      <div style="margin-top: -125px; top: 125px;">
+        {{ include('depute/_carte_profil.html.twig', {balise_titre: 'span'}) }}
+      </div>
       <div class="sticky-top mt-5" style="top: 125px">
-        <div class="card">
-          <div class="card-body text-center">
-            <div class="d-flex justify-content-center">
-              <div class="depute-img-circle">
-                <img src="{{ photo_depute(depute) }}" width="130" height="166" alt="{{ nom_complet }}">
-              </div>
-            </div>
-            <p class="title mt-2 mb-0">{{ nom_complet }}</p>
-            {% if depute.groupe_libelle %}
-              <p class="mb-0 small" style="color: {{ depute.groupe_couleur }}">{{ depute.groupe_libelle|name_group }}</p>
-            {% endif %}
-            <a class="btn btn-outline-primary mt-3" href="{{ profil }}">Retour profil</a>
-          </div>
-        </div>
-
         {% if categories %}
           <div class="card mt-3">
             <div class="card-body badges-filter px-4 py-3">
@@ -60,98 +67,117 @@
     </div>
 
     <div class="col-md-10 col-lg-8 offset-md-1 offset-lg-0 pl-lg-5 bloc-votes-datan">
-      <div class="d-lg-none btn-back mt-4">
-        <a class="btn btn-outline-primary" href="{{ profil }}">Retour profil</a>
-      </div>
-      <h1 class="mb-4 mt-4">Les votes de {{ nom_complet }} à l'Assemblée nationale</h1>
-      <p>
-        L'équipe de Datan décrypte les votes les plus intéressants de la législature et les
-        remet en contexte. Vous trouverez ici la position que {{ nom_complet }}
-        {{ actif ? 'a prise' : 'avait prise' }} sur chacun d'eux, puis la liste complète des
-        scrutins où {{ femme ? 'elle' : 'il' }} s'est exprimé{{ e }}.
-      </p>
-
-      {% if decryptes %}
-        <h2 class="mt-4">Découvrez les <span class="text-primary">{{ decryptes|length }} vote{{ decryptes|length > 1 ? 's' : '' }}</span> décryptés de {{ nom_complet }}</h2>
-        <div class="row mt-4 sorting">
-          {% for vote in decryptes %}
-            <div class="col-md-6 sorting-item {{ vote.categorie_slug }}">
-              <div class="d-flex justify-content-center my-3">
-                <div class="card card-vote">
-                  <div class="thumb d-flex align-items-center {{ vote.position }}">
-                    <div class="d-flex align-items-center">
-                      <span>{{ vote.position|upper }}</span>
-                    </div>
-                  </div>
-                  <div class="card-header d-flex flex-row justify-content-between">
-                    <span class="date">{{ vote.date_scrutin|date_abregee }}</span>
-                  </div>
-                  <div class="card-body d-flex flex-column justify-content-center">
-                    <span class="title">
-                      <a href="{{ lien_vote(vote.legislature, vote.vote_numero) }}" class="stretched-link underline no-decoration">{{ vote.title }}</a>
-                    </span>
-                    {% if vote.lecture_name %}
-                      <span class="reading mt-2">{{ vote.lecture_name }}</span>
-                    {% endif %}
-                  </div>
-                  {# L'explication de vote est écrite par le député lui-même : c'est
-                     une parole rapportée, jamais une analyse de la rédaction. #}
-                  {% if vote.explication %}
-                    <div class="explication py-2 px-3">
-                      <span class="d-block small font-weight-bold mb-1">L'avis {{ femme ? 'de la' : 'du' }} député{{ e }}</span>
-                      <span class="d-block small font-italic">{{ vote.explication }}</span>
-                    </div>
-                  {% endif %}
-                </div>
-              </div>
-            </div>
-          {% endfor %}
+      <div class="row mt-4 d-none d-lg-block">
+        <div class="col-12 btn-back text-center text-lg-left">
+          <a class="btn btn-outline-primary mx-2" href="{{ profil }}">
+            <svg width="1em" height="1em" viewBox="0 0 16 16" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" d="M5.854 4.646a.5.5 0 0 1 0 .708L3.207 8l2.647 2.646a.5.5 0 0 1-.708.708l-3-3a.5.5 0 0 1 0-.708l3-3a.5.5 0 0 1 .708 0z"/><path fill-rule="evenodd" d="M2.5 8a.5.5 0 0 1 .5-.5h10.5a.5.5 0 0 1 0 1H3a.5.5 0 0 1-.5-.5z"/></svg>
+            Retour profil
+          </a>
         </div>
-      {% endif %}
-
-      <h2 class="mt-5">Tous les votes de {{ nom_complet }}</h2>
-      <p class="small">
-        {{ tous_les_votes|length }} scrutin{{ tous_les_votes|length > 1 ? 's' : '' }} où
-        {{ femme ? 'elle' : 'il' }} s'est exprimé{{ e }}. La loyauté compare {{ femme ? 'son' : 'son' }} vote
-        à la position majoritaire de son groupe <b>au moment du scrutin</b>.
-      </p>
-      <table class="table" id="table-deputes-groupes-votes-all">
-        <caption class="sr-only">Tous les votes de {{ nom_complet }}</caption>
-        <thead>
-          <tr>
-            <th scope="col" class="all">Lég.</th>
-            <th scope="col" class="all">N°</th>
-            <th scope="col" class="min-tablet">Date</th>
-            <th scope="col" class="all">Titre</th>
-            <th scope="col" class="text-center all">Vote</th>
-            <th scope="col" class="text-center all">Loyauté</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for vote in tous_les_votes %}
-            {% set url = lien_vote(vote.legislature, vote.numero) %}
-            {% set numero = vote.numero|congress_numero %}
-            <tr data-href="{{ url }}">
-              <td>{{ vote.legislature }}</td>
-              {# Seules les premières lignes portent une ancre : la page en compte
-                 des milliers. Les autres restent cliquables par la ligne. #}
-              <td>{% if loop.index <= 30 %}<a class="no-decoration" href="{{ url }}">{{ numero }}</a>{% else %}{{ numero }}{% endif %}</td>
-              <td>{{ vote.date_scrutin }}</td>
-              <td>
-                {% if vote.decryptage_title %}
-                  <span class="vote-datan-bold">{{ vote.decryptage_title }}</span><br>
-                {% endif %}
-                <span class="{{ vote.decryptage_title ? 'vote-datan-italic' : '' }}">{{ vote.titre }}</span>
-              </td>
-              <td class="sort text-center sort-{{ vote.position }}">{{ vote.position|upper }}</td>
-              <td class="sort text-center sort-{{ vote.loyaute }}">{{ vote.loyaute ? vote.loyaute|upper ~ e|upper : '' }}</td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+      </div>
+      <div class="row mt-4">
+        <div class="col-12">
+          <h1 class="mb-0">Les votes de {{ nom_complet }} à l'Assemblée nationale</h1>
+        </div>
+      </div>
+      {# Intro en trois paragraphes, mot pour mot (`deputes/votes.php`). #}
+      <div class="row mt-4">
+        <div class="col-12">
+          <p>
+            Les députés jouent un rôle fondamental dans le processus législatif. {{ nom_complet }}, comme ses collègues, participe à la création, la modification et l'adoption des lois. À travers ses votes, {{ femme ? 'elle' : 'il' }} prend position sur des mesures, amendements ou projets de loi.
+          </p>
+          <p>
+            L'équipe de Datan décrypte les votes les plus marquants de l'Assemblée nationale. Nous mettons en lumière les votes ayant suscité une forte attention médiatique ou provoqué des divisions au sein des groupes parlementaires. Chaque vote est expliqué et replacé dans son contexte pour vous permettre de mieux les comprendre.
+          </p>
+          <p>
+            Découvrez sur cette page les positions de <b>{{ nom_complet }}</b> sur ces votes clés.
+          </p>
+        </div>
+      </div>
+      <div class="row mt-4">
+        <div class="col-12">
+          {# Le compte n'inclut que les scrutins où nous avons son vote nominatif :
+             la 17e législature et les deux scrutins-clés de la 16e — datan.fr, qui
+             a les votes des législatures passées, affiche davantage (cf. TODO §1). #}
+          <h2>Découvrez les <span class="text-primary">{{ decryptes|length }} votes</span> décryptés de {{ nom_complet }}</h2>
+        </div>
+      </div>
+      <div class="row mt-4 sorting">
+        {% for vote in decryptes %}
+          <div class="col-md-6 sorting-item {{ vote.categorie_slug }}">
+            <div class="d-flex justify-content-center my-3">
+              {{ include('depute/_carte_vote.html.twig') }}
+            </div>
+          </div>
+        {% endfor %}
+      </div>
     </div>
   </div>
 </div>
+
+{# « Tous les votes » : section pleine largeur sur fond à motifs, comme le
+   legacy (`pg-depute-votes-all` + #pattern_background). #}
+<div class="container-fluid mt-5 py-5 pg-depute-votes-all" id="pattern_background">
+  <div class="container">
+    <div class="row">
+      <div class="col-lg-8 offset-lg-2">
+        <h2 class="text-center" style="font-size: 1.6rem">Tous les votes de {{ nom_complet }}</h2>
+        <p class="text-center">L'équipe de Datan n'analyse qu'une partie des votes de l'Assemblée nationale. Pour une vision complète, découvrez ici l'ensemble des scrutins auxquels {{ nom_complet }} a pris part dans l'hémicycle.</p>
+      </div>
+    </div>
+    <div class="row mt-4">
+      <div class="col-12">
+        <table class="table" id="table-deputes-groupes-votes-all">
+          <caption class="sr-only">Tous les votes de {{ nom_complet }}</caption>
+          {# « Leg. » sans accent et « Résultat » : les intitulés du legacy. #}
+          <thead>
+            <tr>
+              <th scope="col" class="all">Leg.</th>
+              <th scope="col" class="all">N°</th>
+              <th scope="col" class="min-tablet">Date</th>
+              <th scope="col" class="all">Titre</th>
+              <th scope="col" class="text-center all">Résultat</th>
+              <th scope="col" class="text-center all">Loyauté</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for vote in tous_les_votes %}
+              {% set url = lien_vote(vote.legislature, vote.numero) %}
+              {% set numero = vote.numero|congress_numero %}
+              <tr data-href="{{ url }}">
+                <td>{{ vote.legislature }}</td>
+                {# Seules les premières lignes portent une ancre : la page en compte
+                   des milliers. Les autres restent cliquables par la ligne. #}
+                <td>{% if loop.index <= 30 %}<a class="no-decoration" href="{{ url }}">{{ numero }}</a>{% else %}{{ numero }}{% endif %}</td>
+                <td>{{ vote.date_scrutin }}</td>
+                <td>
+                  {% if vote.decryptage_title %}
+                    <span class="vote-datan-bold">{{ vote.decryptage_title }}</span><br>
+                    <span class="vote-datan-italic">{{ vote.titre }}</span>
+                  {% else %}
+                    {{ vote.titre }}
+                  {% endif %}
+                </td>
+                <td class="sort text-center sort-{{ vote.position }}">{{ vote.position|upper }}</td>
+                {# Accord au féminin sur LOYALE seulement : le legacy accole un E
+                   aussi à REBELLE (« REBELLEE »), qui est épicène — coquille. #}
+                <td class="sort text-center sort-{{ vote.loyaute }}">{{ vote.loyaute == 'loyal' ? 'LOYAL' ~ e|upper : (vote.loyaute == 'rebelle' ? 'REBELLE' : '') }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+{# Pied de page « Les autres députés … », comme la fiche. #}
+{{ include('depute/_other_mps.html.twig') }}
+
+{# Modales des explications de vote citées dans les cartes. #}
+{% for vote in decryptes|filter(v => v.explication) %}
+  {{ include('depute/_modale_explication.html.twig') }}
+{% endfor %}
 {% endblock %}
 
 {% block javascripts_libraries %}

@@ -165,7 +165,20 @@ class ImportScrutinsCommand extends ImportTricoteusesCommand
             $date = $this->date($scrutin['dateScrutin'] ?? null);
 
             foreach ($scrutin['ventilationVotes']['groupes'] ?? [] as $groupe) {
-                $groupeId = $groupes[$groupe['organeRef'] ?? ''] ?? null;
+                // L'Assemblée publie les ventilations du groupe socialiste de
+                // la 16e sous PO800496 même après son changement de nom en
+                // SOC-A (PO830170) le 19/10/2023 : sans réattribution, 581
+                // ventilations restent au groupe dissous, qui « vote » alors
+                // cinq mois après sa disparition — participation, cohésion et
+                // proximités des deux SOC en sortent faussées. Même correctif
+                // que le legacy (daily.php:1430, « Bug fix for socialist
+                // group »).
+                $organeRef = $groupe['organeRef'] ?? '';
+                if ($organeRef === 'PO800496' && $date !== null && $date >= '2023-10-19') {
+                    $organeRef = 'PO830170';
+                }
+
+                $groupeId = $groupes[$organeRef] ?? null;
                 if ($groupeId === null) {
                     continue;
                 }
@@ -264,11 +277,20 @@ class ImportScrutinsCommand extends ImportTricoteusesCommand
         $contre = (int) ($voix['contre'] ?? 0);
         $abstentions = (int) ($voix['abstentions'] ?? 0);
 
-        // L'Assemblée laisse une position majoritaire même lorsque le groupe
-        // entier s'est abstenu de voter ; le site marque ce cas « nv ».
-        $position = $pour + $contre + $abstentions === 0
-            ? self::NON_VOTANT
-            : ($groupe['vote']['positionMajoritaire'] ?? self::NON_VOTANT);
+        // Ne PAS reprendre le `positionMajoritaire` publié par l'Assemblée : il ne
+        // départage que pour et contre, en ignorant les abstentions — un groupe à
+        // 4 pour / 1 contre / 17 abstentions y est déclaré « pour ». Le site
+        // recalcule depuis toujours la pluralité stricte sur les trois positions
+        // (daily.php:1439-1449) : égalité ou personne d'exprimé → « nv ». S'écarter
+        // de cette règle avait décalé loyautés et proximités de tout le site
+        // (6 983 ventilations divergentes, Bernalicis à 98 % au lieu de 100 %).
+        $position = match (true) {
+            $pour + $contre + $abstentions === 0 => self::NON_VOTANT,
+            $pour > $contre && $pour > $abstentions => 'pour',
+            $contre > $pour && $contre > $abstentions => 'contre',
+            $abstentions > $pour && $abstentions > $contre => 'abstention',
+            default => self::NON_VOTANT,
+        };
 
         return [
             $scrutinId,

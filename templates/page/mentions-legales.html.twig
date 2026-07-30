@@ -9,10 +9,12 @@
    rédaction. #}
 {% block meta_description %}Mentions légales du site Datan.{% endblock %}
 
-{# Le site pose en outre `pg-mentions` sur `<body>`, dont l'unique règle CSS
-   fait apparaître l'icône de Tarte au citron sur cette seule page. Le
-   gestionnaire de consentement n'est pas embarqué ici : la classe n'aurait rien
-   à montrer. #}
+{# Seule page où l'icône de Tarte au citron reste visible : la règle
+   `body:not(.pg-mentions) #tarteaucitronIcon` de main.css la masque partout
+   ailleurs. Classe posée le 25 juillet, avec le portage du gestionnaire de
+   consentement — avant lui, elle n'avait rien à montrer. #}
+{% block classe_body %}pg-mentions{% endblock %}
+
 {% block body %}
 <div class="container-fluid bloc-img-deputes bloc-img d-flex async_background" id="container-always-fluid" style="height: 14em">
   <div class="container d-flex flex-column justify-content-center py-2">
@@ -33,7 +35,9 @@
       <ul>
         {# Le lien vers l'open data de l'Assemblée s'ouvre par `</a href=…>` sur
            le site : la balise fermante avale l'adresse, et « Assemblée
-           nationale » s'affiche en texte mort. #}
+           nationale » s'affiche en texte mort.
+           « les données récoltés » sur le site : accord manqué au féminin
+           pluriel, alors que la puce suivante l'accorde correctement. #}
         <li>Pour les <b>parlementaires</b>, les données récoltées par Datan sont les données publiques venant du site officiel de l'<a href="http://data.assemblee-nationale.fr/#" target="_blank">Assemblée nationale</a>.
           Si vous êtes parlementaire, les données recueillies sur votre activité sont exclusivement des données publiques, issues essentiellement des sites officiels de l’Assemblée nationale, du Sénat et du Journal Officiel.
         </li>
@@ -47,6 +51,8 @@
       <p>Ce site utilise plusieurs types de cookies. Conformément à la réglementation en vigueur, les cookies non essentiels ne sont déposés qu'après recueil de votre consentement via notre gestionnaire de cookies.</p>
 
       <ul>
+        {# « préférences de consenement » sur le site : coquille, le mot est
+           correctement orthographié deux fois dans la même puce. #}
         <li><b>Cookies nécessaires</b> (exemptés de consentement). Ces cookies sont indispensables au bon fonctionnement du site et ne peuvent pas être désactivés. Il s'agit des cookies de session PHP et des préférences de consentement aux cookies.
         </li>
         <li><b>Cookies de mesure d'audience (Google)</b> (soumis à consentement). Ces cookies nous permettent de mesurer la fréquentation du site et d'améliorer son contenu.</li>

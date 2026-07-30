@@ -14,7 +14,15 @@
         <p>
           Le groupe parlementaire qui affiche la plus grande cohésion est <a href="{{ path('groupe_individual', {legislature: plus_uni.legislature, abrev: plus_uni.libelle_abrev|lower}) }}">{{ plus_uni.libelle|name_group }}</a> ({{ plus_uni.libelle_abrev }}), avec un taux de cohésion de <b>{{ plus_uni.score|number_format(2, ',', ' ') }}</b>.
           À l'opposé, le groupe parlementaire avec le plus faible taux de cohésion est <a href="{{ path('groupe_individual', {legislature: plus_divise.legislature, abrev: plus_divise.libelle_abrev|lower}) }}">{{ plus_divise.libelle|name_group }}</a> ({{ plus_divise.libelle_abrev }}).</p>
-        <p>Le taux de cohésion moyen de tous les groupes parlementaires de la législature actuelle est de {{ cohesion_moyenne|number_format(2, ',', ' ') }}.</p>
+        {# Trois décimales, comme le `ROUND(AVG(value), 3)` de `get_stats_avg()`.
+           La page en emploie deux ailleurs — les cartes et le paragraphe
+           au-dessus arrondissent à 0,98 — mais pas ici.
+
+           La valeur, elle, diffère de celle du site (0,925 contre 0,927) :
+           `get_stats_avg()` moyenne `class_groups` sans reprendre le
+           `active = 1` du tableau, et annonce donc une moyenne que ses propres
+           douze lignes ne donnent pas. La nôtre est celle des lignes affichées. #}
+        <p>Le taux de cohésion moyen de tous les groupes parlementaires de la législature actuelle est de {{ cohesion_moyenne|number_format(3, ',', ' ') }}.</p>
       {% endif %}
       {{ include('partials/campagne.html.twig', {classes: 'mt-5'}) }}
     </div>

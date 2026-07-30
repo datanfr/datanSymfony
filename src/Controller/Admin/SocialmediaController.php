@@ -2,10 +2,16 @@
 
 namespace App\Controller\Admin;
 
+use App\Entity\ContactDepute;
+use App\Entity\Depute;
 use App\Entity\Utilisateur;
+use App\Form\ContactDeputeType;
 use App\Legislature;
+use App\Repository\ContactDeputeRepository;
 use Doctrine\DBAL\Connection;
+use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
+use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Attribute\Route;
 use Symfony\Component\Security\Http\Attribute\IsGranted;
@@ -20,21 +26,66 @@ use Symfony\Component\Security\Http\Attribute\IsGranted;
  * Le legacy ne pose ici aucune garde d'administrateur : tout membre de la
  * rédaction y accède.
  *
- * **Deux tableaux du legacy ne sont pas reproductibles en l'état** et le disent
- * franchement au lieu d'afficher du vide trompeur :
- *  - « Postes Assemblée » lit les mandats en organe (commissions), que notre
- *    schéma ne porte pas encore (pas de table de mandats secondaires ni
- *    d'organes) ;
- *  - « Comptes X » lit les pseudos Twitter des députés, une donnée que Datan
- *    tient à la main et qui n'est pas encore importée (cf. CLAUDE.md, réseaux
- *    sociaux à la charge de Datan).
+ * « Postes Assemblée » liste les mandats en organe de la législature en cours,
+ * du plus récent au plus ancien (Deputes_model::get_postes_assemblee). Le legacy
+ * les lit dans une table `mandat_secondaire` unique ; nous l'avons scindée, si
+ * bien que l'écran réunit ses deux composantes de la 17e : les commissions
+ * permanentes ({@see Commission}) et les délégations du Bureau ({@see Organe}).
+ *
+ * « Comptes X », de son côté, est alimenté : les réseaux sociaux des
+ * députés sont récupérés dans `contact_depute` ({@see ContactDepute}) et cet
+ * écran devient leur surface d'entretien — une fiche par député, éditable
+ * ({@see editerDepute}), le legacy n'ayant, lui, aucun formulaire pour cela.
  */
 #[Route('/admin/socialmedia')]
 #[IsGranted(Utilisateur::ROLE_REDACTEUR)]
 class SocialmediaController extends AbstractController
 {
-    public function __construct(private readonly Connection $connection)
+    public function __construct(
+        private readonly Connection $connection,
+        private readonly EntityManagerInterface $em,
+        private readonly ContactDeputeRepository $contacts,
+    ) {
+    }
+
+    /**
+     * Fiche d'édition des réseaux sociaux d'un député
+     * (`socialmedia/editer/{mpId}`), le seul moyen d'entretenir cette donnée.
+     *
+     * Déclarée avant la route générique et plus prioritaire, comme l'historique,
+     * pour que `editer/PAxxxx` ne soit pas avalé par le paramètre `{page}`.
+     */
+    #[Route('/editer/{mpId}', name: 'admin_socialmedia_editer', requirements: ['mpId' => '[A-Za-z0-9]+'], priority: 10, methods: ['GET', 'POST'])]
+    public function editerDepute(string $mpId, Request $request): Response
     {
+        $depute = $this->em->getRepository(Depute::class)->findOneBy(['mpId' => $mpId]);
+
+        if ($depute === null) {
+            throw $this->createNotFoundException('Député inconnu.');
+        }
+
+        // Une fiche neuve rattachée au député si aucune n'existe : un député
+        // jamais renseigné doit pouvoir l'être ici.
+        $contact = $this->contacts->pourDepute($depute);
+
+        $formulaire = $this->createForm(ContactDeputeType::class, $contact);
+        $formulaire->handleRequest($request);
+
+        if ($formulaire->isSubmitted() && $formulaire->isValid()) {
+            $contact->setMisAJourLe(new \DateTimeImmutable());
+            $this->em->persist($contact);
+            $this->em->flush();
+
+            $this->addFlash('succes', 'Réseaux sociaux enregistrés.');
+
+            return $this->redirectToRoute('admin_socialmedia', ['page' => 'x']);
+        }
+
+        return $this->render('admin/socialmedia/edition.html.twig', [
+            'depute' => $depute,
+            'contact' => $contact,
+            'formulaire' => $formulaire,
+        ]);
     }
 
     /**
@@ -92,17 +143,83 @@ class SocialmediaController extends AbstractController
                 'dateDebut' => 'Début', 'dateFin' => 'Fin',
             ]),
             'historique' => $this->historiqueListe(),
-            // Non reproductibles : on l'explique au lieu d'afficher un tableau vide.
-            'postes_assemblee' => $this->indisponible(
-                'Postes Assemblée',
-                "Les mandats en organe (commissions, délégations) ne sont pas encore portés dans ce schéma : cette table reste à faire.",
-            ),
-            'x' => $this->indisponible(
-                'Comptes X des députés',
-                "Les réseaux sociaux des députés sont une donnée que Datan tient à la main, pas encore importée. Cette table sera alimentée quand elle le sera.",
-            ),
+            'x' => $this->render('admin/socialmedia/comptes_x.html.twig', [
+                'titre' => 'Comptes X des députés',
+                'lignes' => $this->comptesX(),
+            ]),
+            'postes_assemblee' => $this->tableau('Nouveaux postes Assemblée', $this->postesAssemblee(), [
+                'prenom' => 'Prénom', 'nom' => 'Nom', 'mpId' => 'mpId',
+                'dateDebut' => 'Prise de fonction', 'dateFin' => 'Fin',
+                'codeQualite' => 'Qualité', 'libelle' => 'Organe',
+            ]),
             default => throw $this->createNotFoundException(),
         };
+    }
+
+    /**
+     * Députés de la législature en cours et leurs réseaux sociaux, pour la table
+     * « Comptes X » — enrichie des autres comptes et d'un lien d'édition, là où
+     * le legacy n'affichait que le pseudo X et un lien vers x.com.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function comptesX(): array
+    {
+        // Le rattachement à la législature passe par un `IN` sur les mandats
+        // plutôt qu'une jointure, pour ne pas dédoubler un député aux mandats
+        // interrompus. La fiche de contact est 1:1, jointe à gauche : un député
+        // jamais renseigné apparaît quand même, avec des comptes vides.
+        return $this->connection->fetchAllAssociative(
+            'SELECT d.firstname AS prenom, d.lastname AS nom, d.mp_id AS mpId,
+                    c.twitter, c.bluesky, c.facebook, c.site_web AS siteWeb
+             FROM depute d
+             LEFT JOIN contact_depute c ON c.depute_id = d.id
+             WHERE d.id IN (SELECT depute_id FROM mandat WHERE legislature = :leg)
+             ORDER BY d.lastname ASC, d.firstname ASC',
+            ['leg' => Legislature::COURANTE],
+        );
+    }
+
+    /**
+     * Mandats en organe de la législature en cours, du plus récent au plus
+     * ancien — l'écran « Postes Assemblée ».
+     *
+     * Le legacy (`Deputes_model::get_postes_assemblee`) lit une table
+     * `mandat_secondaire` unique, où il ne retient que trois types d'organe
+     * (`daily.php:473`) : COMPER, DELEGBUREAU et PARPOL. Nous l'avons scindée —
+     * COMPER dans `fonction_commission`, DELEGBUREAU dans `mandat_organe`, PARPOL
+     * sur `depute.parti_id`. On réunit donc ici les deux composantes qui portent
+     * une législature ; PARPOL n'en porte pas et n'a jamais paru sur cet écran.
+     * Aucun filtre de qualité, comme le legacy (toutes qualités confondues).
+     *
+     * La moitié COMPER compte plus de lignes que datan.fr (~9 900 contre ~8 800) :
+     * c'est la donnée fraîche de `fonction_commission`, la même divergence déjà
+     * actée pour les commissions (l'open data ajoute des mandats au fil du temps,
+     * la copie de production est un instantané plus ancien). Notre chiffre est le
+     * plus à jour.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function postesAssemblee(): array
+    {
+        return $this->connection->fetchAllAssociative(
+            'SELECT d.firstname AS prenom, d.lastname AS nom, d.mp_id AS mpId,
+                    fc.date_debut AS dateDebut, fc.date_fin AS dateFin,
+                    fc.code_qualite AS codeQualite, co.libelle AS libelle
+             FROM fonction_commission fc
+             JOIN depute d ON d.id = fc.depute_id
+             JOIN commission co ON co.id = fc.commission_id
+             WHERE fc.legislature = ?
+             UNION ALL
+             SELECT d.firstname, d.lastname, d.mp_id,
+                    mo.date_debut, mo.date_fin, mo.code_qualite, o.libelle
+             FROM mandat_organe mo
+             JOIN depute d ON d.id = mo.depute_id
+             JOIN organe o ON o.id = mo.organe_id
+             WHERE mo.legislature = ?
+             ORDER BY dateDebut DESC',
+            [Legislature::COURANTE, Legislature::COURANTE],
+        );
     }
 
     /**

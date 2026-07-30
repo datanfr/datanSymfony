@@ -134,9 +134,15 @@
 {% endblock %}
 
 {% block javascripts %}
+  {# L'ordre compte, et il n'est pas alphabétique : `datetime-moment.js` est un
+     greffon de DataTables, il pose `$.fn.dataTable.moment`. Chargé avant la
+     bibliothèque il échoue sans rien poser, et l'initialisation de
+     `datatable-datan.min.js` meurt sur un TypeError — la page rend alors ses
+     8 434 lignes brutes, sans recherche, sans tri ni pagination. C'est l'ordre
+     que sert datan.fr. #}
   <script src="{{ asset('assets/js/libraries/moment/moment.min.js') }}"></script>
-  <script src="{{ asset('assets/js/libraries/datetime/datetime-moment.js') }}"></script>
   <script src="{{ asset('assets/js/dist/datatable-datan.min.js') }}"></script>
+  <script src="{{ asset('assets/js/libraries/datetime/datetime-moment.js') }}"></script>
   <script>
     document.addEventListener('DOMContentLoaded', () => {
       document.querySelectorAll('tr[data-href]').forEach((row) => {

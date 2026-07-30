@@ -42,10 +42,14 @@ class CollecteurDecryptage
      */
     public function collecter(int $legislature, int $numero): ?array
     {
+        // legislature et numero ressortent dans le SELECT pour l'atelier de
+        // décryptage, qui fabrique le lien public via lien_vote() — le
+        // générateur de brouillon, lui, les connaît déjà par ses arguments.
         $scrutin = $this->connection->fetchAssociative(
-            'SELECT id, uid, titre, objet, sort_code, sort_libelle, date_scrutin,
-                    nombre_votants, nombre_pour, nombre_contre, nombre_abstentions,
-                    seance_ref, dossier_id, amendement_id, nature_vote, demandeur
+            'SELECT id, uid, legislature, numero, titre, objet, sort_code, sort_libelle,
+                    date_scrutin, nombre_votants, nombre_pour, nombre_contre,
+                    nombre_abstentions, seance_ref, dossier_id, amendement_id,
+                    nature_vote, demandeur
              FROM scrutin
              WHERE legislature = :legislature AND numero = :numero
                AND uid LIKE \'VTANR%\'',

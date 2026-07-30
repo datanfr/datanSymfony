@@ -129,8 +129,13 @@ class ElectionController extends AbstractController
      * plutôt que de reproduire ce rejet d'infrastructure. Elles restent en
      * revanche hors des plans de site ({@see SitemapController::electionsCommunes()}) :
      * on n'annonce pas une adresse que la référence ne sert pas.
+     *
+     * Les majuscules sont acceptées puis redirigées, pour la même raison que
+     * {@see DepartementController::SLUG} : le site sert `ville_Ajaccio` en 200,
+     * et un segment de commune insensible à la casse serait sans effet si celui
+     * du département l'était seul — les deux se suivent dans la même adresse.
      */
-    public const SLUG_COMMUNE = '[a-z0-9()\-]+';
+    public const SLUG_COMMUNE = '[a-zA-Z0-9()\-]+';
 
     /** Un député ne représente sa commune que s'il siège encore. */
     private const EN_EXERCICE = 'EXISTS (SELECT 1 FROM mandat m
@@ -180,9 +185,24 @@ class ElectionController extends AbstractController
     {
         $ligne = $this->departement($departement);
 
+        if ($ligne === null) {
+            throw $this->createNotFoundException('Département sans page de résultats.');
+        }
+
+        // Avant le cas de Paris, pour que `Paris-75` rejoigne d'abord son
+        // orthographe canonique et n'ait qu'une façon de rendre son 404
+        // ({@see DepartementController::SLUG}).
+        if ($departement !== $ligne['slug']) {
+            return $this->redirectToRoute(
+                'elections_resultats_departement',
+                ['departement' => $ligne['slug']],
+                Response::HTTP_MOVED_PERMANENTLY,
+            );
+        }
+
         // Paris est sa propre commune : le site rend un 404 sur son département
         // et ne mène jamais qu'à `…/paris-75/ville_paris`.
-        if ($ligne === null || $departement === 'paris-75') {
+        if ($departement === 'paris-75') {
             throw $this->createNotFoundException('Département sans page de résultats.');
         }
 
@@ -238,6 +258,16 @@ class ElectionController extends AbstractController
 
         if ($ville === null) {
             throw $this->createNotFoundException('Commune inconnue.');
+        }
+
+        // Même règle qu'ailleurs : la casse trouvée en base fait foi
+        // ({@see DepartementController::SLUG}).
+        if ($departement !== $ville['dpt_slug'] || $commune !== $ville['slug']) {
+            return $this->redirectToRoute(
+                'elections_resultats_commune',
+                ['departement' => $ville['dpt_slug'], 'commune' => $ville['slug']],
+                Response::HTTP_MOVED_PERMANENTLY,
+            );
         }
 
         $circonscriptions = $this->circonscriptions((int) $ville['id']);
@@ -334,8 +364,18 @@ class ElectionController extends AbstractController
      * une page de lecture ; seule la règle d'issue reste au dépôt, pour n'être
      * écrite qu'une fois.
      *
-     * Le groupe est le rattachement courant : un ancien député n'en a pas et sa
-     * carte porte « Ancien député » en pied.
+     * Le groupe nommé en pied est le rattachement courant : un ancien député n'en
+     * a pas et sa carte porte « Ancien député ».
+     *
+     * **Le liseré, lui, suit le dernier groupe connu.** La vue `candidate_full`
+     * du site porte le groupe de la dernière législature du candidat, si bien
+     * que ses anciens députés gardent leur couleur — Caroline Abadie reste
+     * violette (RE, 16e). S'en tenir à `depute.groupe_id` la laisserait sans
+     * liseré : la colonne ne porte que l'appartenance courante, et 66 des 102
+     * candidats aux régionales de 2021 ne siègent plus. D'où la seconde
+     * jointure, qui prend le rattachement le plus récent — encore ouvert
+     * d'abord, puis date de fin la plus tardive — et porte l'alias `g` qu'attend
+     * {@see CouleurGroupe::SQL}.
      *
      * @return list<array<string, mixed>>
      */
@@ -347,11 +387,17 @@ class ElectionController extends AbstractController
                     d.departement_nom, d.departement_code,
                     (SELECT MAX(m.legislature) FROM mandat m WHERE m.depute_id = d.id) AS legislature_last,
                     ' . self::EN_EXERCICE . ' AS actif,
-                    g.libelle AS groupe_libelle, g.libelle_abrev AS groupe_abrev,
+                    gc.libelle AS groupe_libelle, gc.libelle_abrev AS groupe_abrev,
                     ' . CouleurGroupe::SQL . ' AS groupe_couleur
              FROM candidature c
              JOIN depute d ON d.id = c.depute_id
-             LEFT JOIN groupe g ON g.id = d.groupe_id
+             LEFT JOIN groupe gc ON gc.id = d.groupe_id
+             LEFT JOIN groupe g ON g.id = (
+                 SELECT fg.groupe_id FROM fonction_groupe fg
+                 WHERE fg.depute_id = d.id AND fg.nomin_principale = 1
+                 ORDER BY fg.date_fin IS NULL DESC, fg.date_fin DESC
+                 LIMIT 1
+             )
              WHERE c.election_id = :election AND c.visible = 1
              ORDER BY d.lastname, d.firstname',
             ['election' => $election, 'legislature' => Legislature::COURANTE],

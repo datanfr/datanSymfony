@@ -84,10 +84,8 @@ class ImportCommunesCommand extends ImportLegacyCommand
         $departements = $this->importeDepartements((string) $input->getOption('departements'));
         $io->text(sprintf('%d départements.', $departements));
 
-        [$communes, $circonscriptions] = $this->importeCommunes((string) $input->getOption('communes'));
-        $io->text(sprintf('%d communes, %d rattachements à une circonscription.', $communes, $circonscriptions));
-
-        $io->text(sprintf('%d couples de communes limitrophes.', $this->importeAdjacentes((string) $input->getOption('adjacentes'))));
+        $this->importeCommunes($io, (string) $input->getOption('communes'));
+        $this->importeAdjacentes($io, (string) $input->getOption('adjacentes'));
 
         $io->success(sprintf(
             '%d départements, %d communes, %d rattachements et %d voisinages en base.',
@@ -126,10 +124,7 @@ class ImportCommunesCommand extends ImportLegacyCommand
         return \count($lot);
     }
 
-    /**
-     * @return array{0: int, 1: int} communes et rattachements écrits
-     */
-    private function importeCommunes(string $fichier): array
+    private function importeCommunes(SymfonyStyle $io, string $fichier): void
     {
         $idDepartements = $this->connection->fetchAllKeyValue('SELECT code, id FROM departement');
 
@@ -137,6 +132,7 @@ class ImportCommunesCommand extends ImportLegacyCommand
         $circosParInsee = [];
         $lot = [];
         $communes = 0;
+        $sansDepartement = 0;
 
         $misAJour = ['nom', 'slug', 'population', 'population2012', 'code_postal', 'departement_id'];
 
@@ -146,6 +142,8 @@ class ImportCommunesCommand extends ImportLegacyCommand
             $idDepartement = $idDepartements[strtoupper((string) $departement)] ?? null;
 
             if ($idDepartement === null) {
+                ++$sansDepartement;
+
                 continue;
             }
 
@@ -176,26 +174,38 @@ class ImportCommunesCommand extends ImportLegacyCommand
 
         $this->upsert('commune', self::COLONNES_COMMUNE, $lot, $misAJour);
 
-        return [$communes, $this->importeCirconscriptions($circosParInsee)];
+        [$rattachements, $sansCommune] = $this->importeCirconscriptions($circosParInsee);
+
+        $io->text(sprintf('%d communes, %d rattachements à une circonscription.', $communes, $rattachements));
+
+        if ($sansDepartement > 0) {
+            $io->text(sprintf('  %d communes écartées : département absent de l\'export.', $sansDepartement));
+        }
+
+        if ($sansCommune > 0) {
+            $io->text(sprintf('  %d rattachements écartés : commune non écrite.', $sansCommune));
+        }
     }
 
     /**
      * @param array<string, list<int>> $circosParInsee
+     *
+     * @return array{0: int, 1: int} rattachements écrits, rattachements écartés
      */
-    private function importeCirconscriptions(array $circosParInsee): int
+    private function importeCirconscriptions(array $circosParInsee): array
     {
-        // Les identifiants de commune ne sont connus qu'une fois les communes
-        // écrites : d'où cette seconde passe, sur une carte tenue en mémoire —
-        // 36 000 entrées, sans commune mesure avec les mandats.
-        $idCommunes = $this->connection->fetchAllKeyValue('SELECT code_insee, id FROM commune');
+        $idCommunes = $this->idCommunesParInsee();
 
         $lot = [];
         $rattachements = 0;
+        $sansCommune = 0;
 
         foreach ($circosParInsee as $insee => $circos) {
-            $idCommune = $idCommunes[$insee] ?? null;
+            $idCommune = $idCommunes[strtolower((string) $insee)] ?? null;
 
             if ($idCommune === null) {
+                $sansCommune += \count($circos);
+
                 continue;
             }
 
@@ -212,25 +222,37 @@ class ImportCommunesCommand extends ImportLegacyCommand
 
         $this->upsert('commune_circonscription', self::COLONNES_CIRCONSCRIPTION, $lot, []);
 
-        return $rattachements;
+        return [$rattachements, $sansCommune];
     }
 
     /**
      * Communes limitrophes. L'export ne retient que les voisines connues du
      * découpage électoral, et les deux sens du couple y figurent déjà.
+     *
+     * Reste 6 388 couples écartés sur 218 852, tous parce que la commune de
+     * **départ** n'existe pas au découpage — l'export ne garantit que l'autre
+     * bout, sa jointure ne portant que sur `adjacente`. Ils se répartissent
+     * ainsi : 6 342 sur 1 559 codes que le référentiel INSEE de la production ne
+     * connaît plus (des communes fusionnées, Maine-et-Loire, Calvados, Manche et
+     * Orne en tête), et 46 sur neuf communes qu'il connaît mais qui n'ont pas de
+     * circonscription — les six villages détruits de Verdun, sans habitant
+     * depuis 1918, et trois communes rétablies après fusion.
      */
-    private function importeAdjacentes(string $fichier): int
+    private function importeAdjacentes(SymfonyStyle $io, string $fichier): void
     {
-        $idCommunes = $this->connection->fetchAllKeyValue('SELECT code_insee, id FROM commune');
+        $idCommunes = $this->idCommunesParInsee();
 
         $lot = [];
         $couples = 0;
+        $inconnues = 0;
 
         foreach ($this->lignes($fichier) as [$insee, $adjacente]) {
-            $commune = $idCommunes[$insee] ?? null;
-            $voisine = $idCommunes[$adjacente] ?? null;
+            $commune = $idCommunes[strtolower((string) $insee)] ?? null;
+            $voisine = $idCommunes[strtolower((string) $adjacente)] ?? null;
 
             if ($commune === null || $voisine === null) {
+                ++$inconnues;
+
                 continue;
             }
 
@@ -245,7 +267,46 @@ class ImportCommunesCommand extends ImportLegacyCommand
 
         $this->upsert('commune_adjacente', self::COLONNES_ADJACENTE, $lot, []);
 
-        return $couples;
+        $io->text(sprintf('%d couples de communes limitrophes.', $couples));
+
+        if ($inconnues > 0) {
+            $io->text(sprintf('  %d couples écartés : commune absente du découpage électoral.', $inconnues));
+        }
     }
 
+    /**
+     * Communes indexées par code INSEE, **en minuscules des deux côtés**.
+     *
+     * Les identifiants ne sont connus qu'une fois les communes écrites : d'où
+     * cette carte tenue en mémoire — 36 000 entrées, sans commune mesure avec
+     * les mandats.
+     *
+     * La normalisation, elle, n'est pas un confort. Les tables de la production
+     * n'écrivent pas la Corse de la même façon : `circos`, d'où vient
+     * `commune.code_insee`, écrit Ajaccio `2a004` quand `cities_adjacentes`
+     * écrit `2A004`. Les collations de MariaDB ignorent la casse — l'export les
+     * apparie donc sans difficulté et rien ne se voit en SQL. Un tableau PHP,
+     * lui, distingue les deux : chercher `2A004` dans un index bâti sur `2a004`
+     * ne trouvait rien, et l'import écartait **la totalité du voisinage corse**
+     * (1 986 couples) sans un mot — les 360 communes de l'île perdaient leur
+     * bandeau « Communes voisines » sur la fiche de ville comme sur la page de
+     * résultats. C'est le piège décrit dans `CLAUDE.md` : ce qui se casse sur la
+     * casse corse est toujours en dehors de la base.
+     *
+     * On normalise donc la clé de recherche, jamais la donnée : `code_insee`
+     * garde l'orthographe que la production lui donne, et c'est un identifiant
+     * qui est écrit dans `commune_adjacente`.
+     *
+     * @return array<string, int>
+     */
+    private function idCommunesParInsee(): array
+    {
+        $index = [];
+
+        foreach ($this->connection->fetchAllKeyValue('SELECT code_insee, id FROM commune') as $insee => $id) {
+            $index[strtolower((string) $insee)] = (int) $id;
+        }
+
+        return $index;
+    }
 }

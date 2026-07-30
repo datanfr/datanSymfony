@@ -54,8 +54,10 @@
             <th scope="col" class="text-center all">N°</th>
             <th scope="col" class="text-center all">Député</th>
             <th scope="col" class="text-center all">Groupe</th>
+            {# Quatre colonnes, sans le nombre de votes : il départage les rangs
+               mais le site ne le montre pas ici, à la différence des deux
+               tableaux de participation. #}
             <th scope="col" class="text-center all">Taux de loyauté</th>
-            <th scope="col" class="text-center min-tablet">Nombre de votes</th>
           </tr>
         </thead>
         <tbody>
@@ -65,7 +67,6 @@
               <td class="text-center">{{ depute.firstname }} {{ depute.lastname }}</td>
               <td class="text-center">{{ depute.groupe_abrev }}</td>
               <td class="text-center">{{ depute.pourcentage }} %</td>
-              <td class="text-center">{{ depute.denominateur }}</td>
             </tr>
           {% endfor %}
         </tbody>

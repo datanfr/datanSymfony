@@ -74,6 +74,26 @@ class ClassementController extends AbstractController
         'groupes-origine-sociale' => 'La représentativité sociale des groupes politiques',
     ];
 
+    /**
+     * Les mêmes pages, sous les libellés abrégés de la colonne de droite.
+     *
+     * Ce ne sont pas les titres : l'encadré « Nos autres statistiques » écrit
+     * « La proximité au groupe » là où la page s'intitule « La proximité des
+     * députés à leur groupe » (`views/classements/templates/footer.php`).
+     * Cinq des neuf diffèrent — les reprendre du titre allongerait la colonne.
+     */
+    private const MENU = [
+        'deputes-age' => 'L\'âge des députés',
+        'groupes-age' => 'L\'âge moyen au sein des groupes',
+        'groupes-feminisation' => 'Le taux de féminisation des groupes',
+        'deputes-loyaute' => 'La proximité au groupe',
+        'groupes-cohesion' => 'La cohésion des groupes',
+        'deputes-participation' => 'La participation des députés',
+        'groupes-participation' => 'La participation des groupes',
+        'deputes-origine-sociale' => 'L\'origine sociale des députés',
+        'groupes-origine-sociale' => 'La représentativité des groupes',
+    ];
+
     public function __construct(private readonly Connection $connection)
     {
     }
@@ -99,9 +119,11 @@ class ClassementController extends AbstractController
         $agesGroupes = $this->classementGroupes(TypeClassement::GroupesAge);
         $feminisation = $this->classementGroupes(TypeClassement::GroupesFeminisation);
         $cohesion = $this->sansNonInscrits($this->classementGroupes(TypeClassement::GroupesCohesion));
-        $participationGroupes = $this->sansNonInscrits(
-            $this->classementGroupes($this->typeParticipationGroupes()),
-        );
+        // Seule page à ne pas arbitrer entre solennels et scrutins ordinaires :
+        // `Stats::index()` appelle `get_groups_participation()` sans consulter
+        // le seuil, quand la page dédiée, elle, le consulte. D'où les 12 % à
+        // 34 % affichés ici, contre 75 % à 95 % sur /statistiques/groupes-participation.
+        $participationGroupes = $this->classementGroupes(TypeClassement::GroupesParticipationTous);
         $rose = $this->classementGroupes(TypeClassement::GroupesOrigineSociale);
         $familles = $this->familles();
         $cadres = $this->partsFamilleParGroupe(FamilleSocioPro::CADRES);
@@ -114,20 +136,21 @@ class ClassementController extends AbstractController
             'groupes_age' => $this->extremes($agesGroupes, 'Le plus âgé', 'Le plus jeune', fn (array $g) => $g['score_arrondi'] . ' ans'),
             'femmes' => $this->femmes(),
             'femmes_historique' => $this->historiqueFemmes(),
+            'femmes_evolution' => $this->evolutionFemmes(),
             'groupes_femmes_plus' => \array_slice($feminisation, 0, 3),
             'groupes_femmes_moins' => \array_slice($feminisation, -3),
             'loyaute_moyenne' => $this->moyenne(TypeClassement::DeputesLoyaute),
             'deputes_plus_loyaux' => \array_slice($loyaute, 0, 3),
             'deputes_moins_loyaux' => \array_slice($loyaute, -3),
-            'groupes_cohesion' => $this->extremes($cohesion, 'Le plus uni', 'Le plus divisé', fn (array $g) => number_format($g['score'], 2, ',', ' ')),
+            'groupes_cohesion' => $this->extremes($cohesion, 'Le plus divisé', 'Le plus uni', $this->deuxDecimales(...), premierAGauche: false),
             'participation_moyenne' => $this->moyenne($this->typeParticipationDeputes()),
             'deputes_plus_actifs' => \array_slice($participation, 0, 3),
             'deputes_moins_actifs' => \array_slice($participation, -3),
-            'groupes_participation' => $this->extremes($participationGroupes, 'Vote le plus', 'Vote le moins', fn (array $g) => $g['pourcentage'] . ' %'),
+            'groupes_participation' => $this->extremes($participationGroupes, 'Vote le moins', 'Vote le plus', fn (array $g) => $g['pourcentage'] . ' %', premierAGauche: false),
             'familles' => $familles,
             'famille_cadres' => $familles[FamilleSocioPro::CADRES],
-            'groupes_cadres' => $this->extremes($cadres, 'Le plus de cadres', 'Le moins de cadres', fn (array $g) => $g['pourcentage'] . ' %'),
-            'groupes_rose' => $this->extremes($rose, 'Le plus représentatif', 'Le moins représentatif', fn (array $g) => number_format($g['score'], 3, ',', ' ')),
+            'groupes_cadres' => $this->extremes($cadres, 'Le moins de cadres', 'Le plus de cadres', fn (array $g) => $g['pourcentage'] . ' %', premierAGauche: false),
+            'groupes_rose' => $this->extremes($rose, 'Le moins représentatif', 'Le plus représentatif', $this->troisDecimales(...), premierAGauche: false),
             'fil_ariane' => [
                 ['nom' => 'Datan', 'url' => $this->generateUrl('home')],
                 ['nom' => 'Nos statistiques', 'url' => $this->generateUrl('classement_index')],
@@ -160,7 +183,7 @@ class ClassementController extends AbstractController
             ...$donnees,
             'page' => $page,
             'title' => self::PAGES[$page],
-            'pages' => self::PAGES,
+            'pages' => self::MENU,
             'fil_ariane' => [
                 ['nom' => 'Datan', 'url' => $this->generateUrl('home')],
                 ['nom' => 'Nos statistiques', 'url' => $this->generateUrl('classement_index')],
@@ -286,7 +309,13 @@ class ClassementController extends AbstractController
     {
         $solennels = $this->classementGroupes(TypeClassement::GroupesParticipation);
         $tous = $this->classementGroupes(TypeClassement::GroupesParticipationTous);
-        $miseEnAvant = $this->sansNonInscrits($this->assezDeSolennels() ? $solennels : $tous);
+
+        // Contrairement à la cohésion, cette page garde les non-inscrits dans
+        // ses deux cartes : `Stats::individual()` prend les bouts de la liste
+        // entière. Ils y arrivent derniers (75 %), et c'est bien eux que le
+        // site désigne comme participant le moins — les écarter ferait
+        // remonter GDR à leur place.
+        $miseEnAvant = $this->assezDeSolennels() ? $solennels : $tous;
 
         return [
             'solennels' => $solennels,
@@ -324,13 +353,14 @@ class ClassementController extends AbstractController
     {
         $groupes = $this->classementGroupes(TypeClassement::GroupesOrigineSociale);
         $familles = $this->familles();
+        $croise = $this->partsParGroupe();
 
         return [
             'groupes' => $groupes,
             'plus_representatif' => $groupes[0] ?? null,
             'famille_cadres' => $familles[FamilleSocioPro::CADRES],
-            'parts' => $this->partsParGroupe(),
-            'noms_familles' => array_keys(FamilleSocioPro::population()),
+            'parts' => $croise['parts'],
+            'noms_familles' => $croise['familles'],
         ];
     }
 
@@ -359,7 +389,95 @@ class ClassementController extends AbstractController
             ['type' => $type->value, 'legislature' => Legislature::COURANTE],
         );
 
-        return array_map($this->decore(...), $lignes);
+        $deputes = array_map($this->decore(...), $lignes);
+
+        return $type === TypeClassement::DeputesAge
+            ? $this->numerote($deputes)
+            : $this->classeAuScoreExact($deputes, $type->decimalesDuScore());
+    }
+
+    /**
+     * Réordonne et renumérote un classement de députés, comme le
+     * `RANK() OVER (ORDER BY score DESC, votesN DESC)` de l'application
+     * d'origine.
+     *
+     * Deux choses s'y jouent, et elles tirent en sens contraire.
+     *
+     * Le rang écrit par la commande de calcul souffre du DECIMAL(8,3) : le tri
+     * s'y fait sur un score déjà arrondi, et le nombre de votes — qui départage
+     * les égalités — n'y entre pas. On refait donc les deux ici, où
+     * `numerateur` et `denominateur` sont encore des entiers.
+     *
+     * Mais l'égalité ne se juge pas sur la fraction exacte pour autant : elle se
+     * juge à la précision où l'application d'origine range le score, deux
+     * décimales pour la participation (`class_participation*`), trois pour la
+     * loyauté (`class_loyaute`). C'est ce qui fait les blocs d'ex æquo du site :
+     * six députés partagent le rang 1 de la participation aux solennels avec
+     * 72 votes sur 72, le suivant porte le 7 avec 68 sur 68 ; et deux
+     * non-inscrits partagent le rang 574 de la participation générale à 2 %,
+     * alors que leurs fractions, sur 8 402 scrutins, ne sont pas les mêmes.
+     * Départager à la fraction exacte les renumérotait un par un.
+     *
+     * @param list<array<string, mixed>> $classement
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function classeAuScoreExact(array $classement, int $decimales): array
+    {
+        if ($classement === [] || $classement[0]['numerateur'] === null || $classement[0]['denominateur'] === null) {
+            return $classement;
+        }
+
+        foreach ($classement as $position => $ligne) {
+            $denominateur = (int) $ligne['denominateur'];
+
+            $classement[$position]['cle'] = [
+                $denominateur > 0 ? round((int) $ligne['numerateur'] / $denominateur, $decimales) : 0.0,
+                $denominateur,
+            ];
+        }
+
+        // Score décroissant, puis nombre de votes décroissant : les deux termes
+        // du `ORDER BY` d'origine, dans cet ordre.
+        usort($classement, static fn (array $a, array $b): int => $b['cle'] <=> $a['cle']);
+
+        $rang = 0;
+        $precedent = null;
+
+        foreach ($classement as $position => $ligne) {
+            if ($ligne['cle'] !== $precedent) {
+                $rang = $position + 1;
+                $precedent = $ligne['cle'];
+            }
+
+            $classement[$position]['rang'] = $rang;
+            unset($classement[$position]['cle']);
+        }
+
+        return $classement;
+    }
+
+    /**
+     * Renumérote un classement de 1 à N, sans égalités.
+     *
+     * L'âge est le seul des neuf classements que l'application d'origine ne
+     * passe pas par `RANK()` : `get_ranking_age()` numérote les lignes au fil
+     * de l'eau (`stats_model.php:29`). Deux députés nés la même année s'y
+     * suivent donc en 2 et 3, et le dernier porte le 577 — quand un rang avec
+     * ex æquo s'arrêterait à 573. Le site le montre ainsi depuis toujours :
+     * c'est sa numérotation, pas une erreur d'arrondi.
+     *
+     * @param list<array<string, mixed>> $classement
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function numerote(array $classement): array
+    {
+        foreach ($classement as $position => $ligne) {
+            $classement[$position]['rang'] = $position + 1;
+        }
+
+        return $classement;
     }
 
     /**
@@ -393,15 +511,28 @@ class ClassementController extends AbstractController
     private function decore(array $ligne): array
     {
         $score = (float) $ligne['score'];
+        $numerateur = $ligne['numerateur'] !== null ? (int) $ligne['numerateur'] : null;
+        $denominateur = $ligne['denominateur'] !== null ? (int) $ligne['denominateur'] : null;
+
+        // `classement.score` est un DECIMAL(8,3) : la fraction y perd ses
+        // décimales suivantes, et l'arrondi au point de pourcentage se fait
+        // alors sur une valeur déjà arrondie. Les 45 femmes d'EPR sur 91 sièges
+        // valent 49,45 % ; stockées 0,495 elles ressortent à 50 %. Ce double
+        // arrondi déplaçait d'un point 38 taux de loyauté et 32 de
+        // participation. Quand le classement garde ses deux termes, le
+        // pourcentage se refait sur eux.
+        $pourcentage = $numerateur !== null && $denominateur > 0
+            ? (int) round($numerateur / $denominateur * 100)
+            : (int) round($score * 100);
 
         return [
             ...$ligne,
             'rang' => (int) $ligne['rang'],
             'score' => $score,
             'score_arrondi' => (int) round($score),
-            'pourcentage' => (int) round($score * 100),
-            'numerateur' => $ligne['numerateur'] !== null ? (int) $ligne['numerateur'] : null,
-            'denominateur' => $ligne['denominateur'] !== null ? (int) $ligne['denominateur'] : null,
+            'pourcentage' => $pourcentage,
+            'numerateur' => $numerateur,
+            'denominateur' => $denominateur,
         ];
     }
 
@@ -409,24 +540,62 @@ class ClassementController extends AbstractController
      * Les deux bouts d'un classement, tels que les affichent les cartes en
      * vis-à-vis : un titre, le groupe, et le score mis en forme.
      *
+     * Les titres sont donnés dans l'ordre où les cartes s'affichent, de gauche
+     * à droite, et `$premierAGauche` dit lequel des deux bouts occupe la
+     * gauche. L'application d'origine ne les présente pas toutes dans le même
+     * sens : `Stats::index()` monte `groups_age_edited` avec le premier du
+     * classement en `first`, mais cohésion, participation, cadres et
+     * représentativité y mettent le **dernier**. Le sens appartient donc à
+     * l'appel, pas à cette méthode.
+     *
      * @param list<array<string, mixed>> $classement
      * @param callable(array<string, mixed>): string $stat
      *
-     * @return array{premier: array<string, mixed>, dernier: array<string, mixed>}|null
+     * @return array{gauche: array<string, mixed>, droite: array<string, mixed>}|null
      */
-    private function extremes(array $classement, string $titrePremier, string $titreDernier, callable $stat): ?array
-    {
+    private function extremes(
+        array $classement,
+        string $titreGauche,
+        string $titreDroite,
+        callable $stat,
+        bool $premierAGauche = true,
+    ): ?array {
         if ($classement === []) {
             return null;
         }
 
         $premier = $classement[0];
         $dernier = end($classement);
+        [$gauche, $droite] = $premierAGauche ? [$premier, $dernier] : [$dernier, $premier];
 
         return [
-            'premier' => ['titre' => $titrePremier, 'groupe' => $premier, 'stat' => $stat($premier)],
-            'dernier' => ['titre' => $titreDernier, 'groupe' => $dernier, 'stat' => $stat($dernier)],
+            'gauche' => ['titre' => $titreGauche, 'groupe' => $gauche, 'stat' => $stat($gauche)],
+            'droite' => ['titre' => $titreDroite, 'groupe' => $droite, 'stat' => $stat($droite)],
         ];
+    }
+
+    /**
+     * Indice de cohésion, à deux décimales.
+     *
+     * L'application d'origine laisse `round()` écrire « 0.86 » : un séparateur
+     * décimal anglais au milieu d'une page française. Faute de typographie,
+     * corrigée — le chiffre, lui, est le même.
+     *
+     * @param array<string, mixed> $groupe
+     */
+    private function deuxDecimales(array $groupe): string
+    {
+        return number_format((float) $groupe['score'], 2, ',', ' ');
+    }
+
+    /**
+     * Indice de Rose, à trois décimales — même correction de séparateur.
+     *
+     * @param array<string, mixed> $groupe
+     */
+    private function troisDecimales(array $groupe): string
+    {
+        return number_format((float) $groupe['score'], 3, ',', ' ');
     }
 
     /**
@@ -442,6 +611,20 @@ class ClassementController extends AbstractController
         ));
     }
 
+    /**
+     * Moyenne d'un classement — celle de ses lignes affichées.
+     *
+     * Les deux moyennes de participation des **députés** sortent un point
+     * au-dessus de celles du site (90 % contre 89 %, 26 % contre 25 %), et pour
+     * la même raison que la cohésion moyenne des groupes : `class_participation`
+     * garde une ligne par député ayant voté sous la législature, anciens
+     * compris, et `get_mps_participation_mean()` les moyenne tous quand le
+     * tableau, lui, n'affiche que les 577 en exercice. Les ministres et les
+     * suppléés de passage, qui n'y figurent pas, tirent donc vers le bas une
+     * moyenne présentée comme celle du tableau. Nous moyennons ce que nous
+     * montrons — divergence assumée, elle corrige. Les quatre moyennes de
+     * groupes, elles, tombent juste.
+     */
     private function moyenne(TypeClassement $type): float
     {
         return (float) $this->connection->fetchOne(
@@ -519,6 +702,31 @@ class ClassementController extends AbstractController
     }
 
     /**
+     * Le sens de l'évolution de la part de femmes depuis la législature
+     * précédente, tel que la phrase de la page le formule.
+     *
+     * L'application d'origine écrit « a légèrement baissé » en dur
+     * (`views/classements/index.php:127`) : chez elle la comparaison portait
+     * sur 39 % puis 38 %, et son historique s'arrête à une 16e législature
+     * qu'elle prolonge jusqu'en 2027. La dissolution de 2024 l'a périmée sans
+     * que personne ne la relise — 37 % à la 16e, 38 % aujourd'hui, c'est une
+     * hausse. Le verbe se déduit donc des deux dernières valeurs plutôt que de
+     * rester écrit.
+     */
+    private function evolutionFemmes(): string
+    {
+        $historique = $this->historiqueFemmes();
+        $precedente = $historique[\count($historique) - 2]['pourcentage'] ?? null;
+        $courante = end($historique)['pourcentage'];
+
+        return match (true) {
+            $precedente === null || $courante === $precedente => 'est resté stable',
+            $courante < $precedente => 'a légèrement baissé',
+            default => 'a légèrement augmenté',
+        };
+    }
+
+    /**
      * Répartition des députés en exercice dans les huit familles
      * socio-professionnelles de l'INSEE, rapportée à leur poids dans la
      * population. Un dénombrement sur 577 lignes : il n'y a rien à précalculer.
@@ -583,7 +791,11 @@ class ClassementController extends AbstractController
              WHERE g.legislature = :legislature AND g.date_fin IS NULL
                AND g.libelle_abrev <> :ni AND ' . sprintf(self::EN_EXERCICE, 'd') . '
              GROUP BY g.id, g.legislature, g.libelle, g.libelle_abrev, g.couleur
-             ORDER BY COUNT(ps.id) / ' . self::EFFECTIF_SQL . ' DESC',
+             -- Le sigle départage les ex æquo, que l\'application d\'origine
+             -- laisse à MariaDB : UDDPLR et GDR comptent tous deux 9 cadres sur
+             -- 17 sièges, et sans second critère la carte « le moins de cadres »
+             -- change de groupe d\'un rendu à l\'autre.
+             ORDER BY COUNT(ps.id) / ' . self::EFFECTIF_SQL . ' DESC, g.libelle_abrev ASC',
             ['famille' => $famille, 'legislature' => Legislature::COURANTE, 'ni' => self::NON_INSCRITS],
         );
 
@@ -604,35 +816,61 @@ class ClassementController extends AbstractController
      * Part de chaque famille socio-professionnelle dans chaque groupe, en
      * pourcentage : le tableau croisé de la page « représentativité ».
      *
-     * @return array<string, array<string, int>>
+     * Le dénominateur est l'effectif du groupe, pas le nombre de députés
+     * classés — c'est le `ge.effectif` de `get_groups_representativite()`. La
+     * colonne d'un groupe ne fait donc 100 % que si tous ses membres ont
+     * déclaré une profession, d'où la ligne « Sans profession déclarée » qui
+     * recueille les autres : sans elle, il manque jusqu'à 12 % d'une colonne
+     * sans que rien ne le dise.
+     *
+     * @return array{parts: array<string, array<string, int>>, familles: list<string>}
      */
     private function partsParGroupe(): array
     {
+        // `LEFT JOIN` puis `COALESCE` : un député sans ligne `profil_social`
+        // n'est pas dans un autre cas qu'un député dont la famille est nulle —
+        // les deux sont des professions non déclarées, et les deux comptent.
         $lignes = $this->connection->fetchAllAssociative(
-            'SELECT g.libelle_abrev, ps.fam_soc_pro, COUNT(*) AS nombre,
+            'SELECT g.libelle_abrev, COALESCE(ps.fam_soc_pro, :sansProfession) AS famille,
+                    COUNT(*) AS nombre,
                     ' . self::EFFECTIF_SQL . ' AS effectif
              FROM depute d
              JOIN groupe g ON g.id = d.groupe_id
-             JOIN profil_social ps ON ps.depute_id = d.id
+             LEFT JOIN profil_social ps ON ps.depute_id = d.id
              WHERE g.legislature = :legislature AND g.date_fin IS NULL
-               AND g.libelle_abrev <> :ni AND ps.fam_soc_pro IS NOT NULL
+               AND g.libelle_abrev <> :ni
                AND ' . sprintf(self::EN_EXERCICE, 'd') . '
-             GROUP BY g.id, g.libelle_abrev, ps.fam_soc_pro
+             GROUP BY g.id, g.libelle_abrev, famille
              ORDER BY g.libelle_abrev',
-            ['legislature' => Legislature::COURANTE, 'ni' => self::NON_INSCRITS],
+            [
+                'legislature' => Legislature::COURANTE,
+                'ni' => self::NON_INSCRITS,
+                'sansProfession' => FamilleSocioPro::SANS_PROFESSION,
+            ],
         );
 
         $parts = [];
+        $presentes = [];
 
         foreach ($lignes as $ligne) {
             $effectif = (int) $ligne['effectif'];
+            $presentes[$ligne['famille']] = true;
 
-            $parts[$ligne['libelle_abrev']][$ligne['fam_soc_pro']] = $effectif > 0
+            $parts[$ligne['libelle_abrev']][$ligne['famille']] = $effectif > 0
                 ? (int) round((int) $ligne['nombre'] / $effectif * 100)
                 : 0;
         }
 
-        return $parts;
+        // Les familles de l'INSEE dans leur ordre de référence, puis les
+        // non-déclarés en fin de tableau. Celles que personne ne représente —
+        // aucun retraité, aucun inactif à la 17e — ne font pas une ligne de
+        // zéros : le site ne montre que les familles qu'il a rencontrées.
+        $familles = array_values(array_filter(
+            [...array_keys(FamilleSocioPro::population()), FamilleSocioPro::SANS_PROFESSION],
+            static fn (string $famille): bool => isset($presentes[$famille]),
+        ));
+
+        return ['parts' => $parts, 'familles' => $familles];
     }
 
     /**

@@ -2,23 +2,11 @@
 
 {% block title %}Demandes de compte député{% endblock %}
 
-{# Dans l'espace des demandes, la barre latérale montre les deux entrées de la
-   rédaction — la page des décryptages n'étant pas modifiable ici, on redéclare
-   son lien à côté du nôtre. #}
-{% block sidebar_menu %}
-  <li class="nav-item">
-    <a href="{{ path('admin_decryptage_index') }}" class="nav-link">
-      <i class="nav-icon far fa-file-alt"></i>
-      <p>Décryptages</p>
-    </a>
-  </li>
-  <li class="nav-item">
-    <a href="{{ path('admin_demande_compte_index') }}" class="nav-link active">
-      <i class="nav-icon far fa-id-card"></i>
-      <p>Demandes de compte</p>
-    </a>
-  </li>
-{% endblock %}
+{# Pas de `sidebar_menu` ici : cet écran en redéclarait un à deux entrées, du
+   temps où `admin/base.html.twig` lui était fermé et n'annonçait pas encore les
+   demandes de compte. La coque porte désormais le menu complet, l'entrée de
+   cette page comprise — l'ancien bloc amputait la barre latérale des huit autres
+   sections dès qu'on ouvrait les demandes. #}
 
 {% block body %}
   <p class="mt-2">

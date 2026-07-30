@@ -38,7 +38,9 @@ class CampagneType extends AbstractType
                 'label' => 'Message de la campagne',
                 // Même éditeur riche que les décryptages : le message est du HTML
                 // injecté tel quel dans l'encart de dons.
-                'attr' => ['id' => 'editor', 'rows' => 5],
+                // Classe et non id « editor » : en id il ferait doublon avec
+                // l'id du champ et serait supprimé au rendu (init-ckeditor.js).
+                'attr' => ['class' => 'js-ckeditor', 'rows' => 5],
                 'constraints' => [new NotBlank()],
             ])
             ->add('dateDebut', DateType::class, [

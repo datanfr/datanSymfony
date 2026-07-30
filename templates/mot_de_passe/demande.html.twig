@@ -4,7 +4,10 @@
 
    Écart assumé et commenté au contrôleur : un seul message, neutre, qu'un compte
    existe ou non — le legacy distinguait « e-mail envoyé » et « nous ne trouvons
-   pas votre email », révélant qui a un compte (énumération). #}
+   pas votre email », révélant qui a un compte (énumération).
+
+   Pas de lien « Retour à la connexion » : le site n'en a pas, et le logo ramène à
+   l'accueil comme partout ailleurs dans ce parcours. #}
 <!doctype html>
 <html lang="fr">
 <head>
@@ -33,7 +36,7 @@
             <div class="col-lg-8 col-md-10 col-10 offset-lg-2 offset-md-1 offset-1">
               <div class="row mt-5 d-flex flex-column justify-content-center login_form">
                 <h1 class="text-center my-4">Réinitialisez votre mot de passe</h1>
-                <p>Indiquez l'adresse avec laquelle vous êtes inscrit. Vous recevrez un courriel avec un lien permettant de créer un nouveau mot de passe.</p>
+                <p>Indiquez l'e-mail avec lequel vous êtes inscrit. Vous recevrez dans quelques instants un e-mail avec un lien permettant de créer un nouveau mot de passe.</p>
 
                 {% for message in app.flashes('succes') %}
                   <div class="alert alert-success mb-4 text-center" role="alert">{{ message }}</div>
@@ -47,9 +50,9 @@
                 </div>
                 <input type="hidden" name="_token" value="{{ csrf_token('mot_de_passe_oubli') }}">
                 <button type="submit" class="btn btn-primary btn-block">Valider</button>
-                <p class="mt-4"><a href="{{ path('connexion') }}">Retour à la connexion</a></p>
               </div>
             </div>
+            {# Année courante là où le site a figé « 2020 » en dur — cf. connexion. #}
             <div class="col-lg-8 col-md-10 col-10 offset-lg-2 offset-md-1 offset-1 login_credits pt-3 mt-4">
               <p>© Datan {{ 'now'|date('Y') }} - Tous droits réservés</p>
             </div>

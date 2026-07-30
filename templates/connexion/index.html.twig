@@ -35,6 +35,13 @@
           </div>
           <div class="row mt-5">
             <div class="col-lg-8 col-md-10 col-10 offset-lg-2 offset-md-1 offset-1">
+              {# Bascule connexion / inscription, en tête du bloc comme sur le site.
+                 L'inscription porte déjà la paire ; elle manquait ici, si bien que
+                 le va-et-vient ne se faisait que dans un sens. #}
+              <div class="row login_links">
+                <a href="{{ path('connexion') }}" class="py-3 active">SE CONNECTER</a>
+                <a href="{{ path('inscription') }}" class="py-3 inactive">S'INSCRIRE</a>
+              </div>
               <div class="row mt-5 d-flex flex-column justify-content-center login_form">
                 <h1 class="text-center my-4">Connectez-vous à votre compte</h1>
 
@@ -63,9 +70,16 @@
                 <button type="submit" class="btn btn-primary btn-block">Se connecter</button>
                 <a class="mt-4" href="{{ path('mot_de_passe_oubli') }}">Mot de passe oublié ?</a>
                 <p class="mt-4">Pas encore de compte sur Datan ? <a href="{{ path('inscription') }}">Inscrivez-vous</a></p>
+                {# « vous n'avez pas encore un compte Datan » sur le site : la
+                   négation appelle « de compte », pas « un compte ». Même phrase,
+                   même faute, sur l'inscription — corrigée aux deux endroits. #}
                 <p>Vous êtes député et n'avez pas encore de compte Datan ? <a href="{{ path('demande_compte_depute') }}">Demandez-le !</a></p>
               </div>
             </div>
+            {# Les trois écrans de compte du site affichent « © Datan 2020 », l'année
+               étant écrite en dur dans chaque vue et jamais reprise depuis. Une
+               mention de copyright figée six ans en arrière est un défaut, pas un
+               parti pris : on rend l'année courante. #}
             <div class="col-lg-8 col-md-10 col-10 offset-lg-2 offset-md-1 offset-1 login_credits pt-3 mt-4">
               <p>© Datan {{ 'now'|date('Y') }} - Tous droits réservés</p>
             </div>

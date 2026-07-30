@@ -2,7 +2,17 @@
 
 {% block title %}{{ decryptage ? 'Modifier un décryptage' : 'Décrypter un vote' }}{% endblock %}
 
+{% block stylesheets %}
+  <link rel="stylesheet" href="{{ asset('assets/css/atelier-decryptage.css') }}">
+{% endblock %}
+
 {% block body %}
+  {# Sans thème, Symfony rend des <input> nus qu'AdminLTE (Bootstrap 4) n'habille
+     pas — le reste de l'admin contourne en écrivant le HTML à la main. Le thème
+     Bootstrap 4 pose `form-control`, `custom-select`, `custom-control` et les
+     libellés partout. Appliqué ici seulement, pas dans twig.yaml : les autres
+     formulaires de l'admin ne sont pas de ce chantier. #}
+  {% form_theme formulaire 'bootstrap_4_layout.html.twig' %}
   {{ form_start(formulaire) }}
     {# Erreurs non rattachées à un champ (jeton expiré, contrainte d'ensemble) :
        sans cela le formulaire se réafficherait sans rien expliquer. #}
@@ -13,36 +23,52 @@
       </div>
     {% endif %}
 
-    <div class="row">
-      <div class="col-lg-8">
-        <div class="card">
-          <div class="card-body">
-            {% if formulaire.legislature is defined %}
+    {# L'atelier : la matière du scrutin en regard du formulaire — le rédacteur
+       écrit avec les débats sous les yeux, comme sur PoliticAnalysis, dont ce
+       système est repris. Sous lg, le formulaire passe devant. #}
+    <div class="row atelier-decryptage">
+      <div class="col-lg-7 order-2 order-lg-1">
+        {% if matiere %}
+          {{ include('admin/decryptage/_matiere.html.twig') }}
+        {% else %}
+          <div class="card">
+            <div class="card-body text-muted">
+              {% if decryptage %}
+                Matière indisponible pour ce scrutin : vote du Congrès — son
+                compte rendu n'est pas dans nos données — ou scrutin absent de
+                la base.
+              {% else %}
+                <p class="mb-1"><strong>L'atelier attend un scrutin.</strong></p>
+                <p class="mb-0">
+                  Renseignez la législature et le numéro (ou arrivez par
+                  « Décrypter » depuis l'écran des amendements) : la matière du
+                  vote — débats en séance, exposé des motifs, résultat par
+                  groupe — s'affichera ici. Si rien ne s'affiche malgré un
+                  numéro renseigné, le scrutin est inconnu de la base, ou c'est
+                  un vote du Congrès.
+                </p>
+              {% endif %}
+            </div>
+          </div>
+        {% endif %}
+      </div>
+
+      <div class="col-lg-5 order-1 order-lg-2">
+        {% if formulaire.legislature is defined %}
+          <div class="card">
+            <div class="card-header"><h2 class="card-title h6 mb-0">Le scrutin</h2></div>
+            <div class="card-body">
               <div class="form-row">
                 <div class="col-md-4">{{ form_row(formulaire.legislature) }}</div>
                 <div class="col-md-8">{{ form_row(formulaire.voteNumero) }}</div>
               </div>
-            {% endif %}
-            {{ form_row(formulaire.title) }}
-            {{ form_row(formulaire.description) }}
+            </div>
           </div>
-        </div>
-      </div>
+        {% endif %}
 
-      <div class="col-lg-4">
-        <div class="card">
-          <div class="card-body">
-            {{ form_row(formulaire.categorie) }}
-            {{ form_row(formulaire.lecture) }}
-            {% if formulaire.state is defined %}
-              {{ form_row(formulaire.state) }}
-            {% else %}
-              <p class="text-muted mb-0">Le décryptage sera enregistré en brouillon ; vous pourrez le publier ensuite.</p>
-            {% endif %}
-          </div>
-        </div>
-
-        {% if decryptage and decryptage.scrutin %}
+        {# La carte de lien public ne sert qu'en repli, quand la matière manque
+           (vote du Congrès) : sinon le lien vit dans la carte « Le scrutin ». #}
+        {% if matiere is null and decryptage and decryptage.scrutin %}
           <div class="card">
             <div class="card-body">
               <h2 class="h6">Le scrutin décrypté</h2>
@@ -53,27 +79,62 @@
           </div>
         {% endif %}
 
-        {% if ia_actif %}
-          {# Le brouillon pré-remplit les champs, rien de plus : la rédaction
-             relit, corrige et décide seule de la publication. #}
-          <div class="card">
-            <div class="card-body">
-              <h2 class="h6">Brouillon par IA</h2>
+        <div class="card">
+          <div class="card-header"><h2 class="card-title h6 mb-0">Rédaction</h2></div>
+          <div class="card-body">
+            {{ form_row(formulaire.title) }}
+            {{ form_row(formulaire.description) }}
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header"><h2 class="card-title h6 mb-0">Classement</h2></div>
+          <div class="card-body">
+            {% if decryptage is null and matiere %}
+              {{ form_row(formulaire.categorie, {help: "Pré-sélectionnée d'après le titre du scrutin — vérifiez."}) }}
+            {% else %}
+              {{ form_row(formulaire.categorie) }}
+            {% endif %}
+            {{ form_row(formulaire.lecture) }}
+            {% if formulaire.state is defined %}
+              {{ form_row(formulaire.state) }}
+            {% else %}
+              <p class="text-muted mb-0">Le décryptage sera enregistré en brouillon ; vous pourrez le publier ensuite.</p>
+            {% endif %}
+          </div>
+        </div>
+
+        {# Le brouillon pré-remplit les champs, rien de plus : la rédaction
+           relit, corrige et décide seule de la publication. La carte reste
+           visible sans modèle configuré — un bouton qui disparaît fait croire
+           que la fonctionnalité n'existe pas. #}
+        <div class="card">
+          <div class="card-header"><h2 class="card-title h6 mb-0">Brouillon par IA</h2></div>
+          <div class="card-body">
+            {% if ia_actif %}
               <p class="small text-muted mb-2">
                 Rédige un premier jet à partir du scrutin, du dossier et des débats
                 en séance ({{ ia_modele }}). Chaque citation est vérifiée contre le
                 compte rendu — relisez avant de publier.
               </p>
-              <button type="button" id="bouton-brouillon-ia" class="btn btn-sm btn-outline-primary"
+              <button type="button" id="bouton-brouillon-ia" class="btn btn-sm btn-ia"
                       data-url="{{ path('admin_decryptage_brouillon_ia') }}"
                       data-token="{{ csrf_token('brouillon_ia') }}"
                       {% if decryptage %}data-legislature="{{ decryptage.legislature }}" data-numero="{{ decryptage.voteNumero }}"{% endif %}>
                 Générer un brouillon
               </button>
               <div id="etat-brouillon-ia" class="small mt-2"></div>
-            </div>
+            {% else %}
+              <button type="button" class="btn btn-sm btn-ia" disabled
+                      title="IA non configurée (IA_MODELE)">Générer un brouillon</button>
+              <p class="small text-muted mb-0 mt-2">
+                IA non configurée : renseignez <code>IA_MODELE</code> (et
+                <code>ANTHROPIC_API_KEY</code> pour un modèle claude-*) dans
+                <code>.env.local</code>.
+              </p>
+            {% endif %}
           </div>
-        {% endif %}
+        </div>
 
         <button type="submit" class="btn btn-primary btn-block">Enregistrer</button>
         <a class="btn btn-link btn-block" href="{{ path('admin_decryptage_index') }}">Revenir à la liste</a>
@@ -83,7 +144,8 @@
 {% endblock %}
 
 {% block javascripts %}
-  {# Même éditeur que le tableau de bord d'origine : CKEditor 5, monté sur #editor. #}
+  {# Même éditeur que le tableau de bord d'origine : CKEditor 5, monté sur les
+     champs de classe .js-ckeditor. #}
   <script type="importmap">
     {
       "imports": {
@@ -143,25 +205,38 @@
                 window.editor.setData(resultat.json.description);
               }
 
+              // Le rapport de citations, dans l'encart vert/orange de
+              // PoliticAnalysis — construit par textContent : les citations
+              // viennent du modèle, elles restent échappées.
+              etat.innerHTML = '';
+              var resume = document.createElement('div');
+              resume.textContent = 'Brouillon posé dans le formulaire (' + resultat.json.paroles + ' interventions lues).';
+              etat.appendChild(resume);
+
               var validation = resultat.json.validation;
-              var html = 'Brouillon posé dans le formulaire (' + resultat.json.paroles + ' interventions lues).';
-              if (validation.total > 0) {
-                html += '<br>Citations : ' + validation.valides + '/' + validation.total + ' retrouvées dans le compte rendu.';
-                if (validation.invalides > 0) {
-                  html += '<br><span class="text-danger">À vérifier avant publication :</span><ul class="mb-0 pl-3">';
-                  validation.citations.forEach(function (c) {
-                    if (!c.valide) {
-                      var li = document.createElement('li');
-                      li.textContent = '« ' + c.texte + ' »';
-                      html += li.outerHTML;
-                    }
-                  });
-                  html += '</ul>';
-                }
+              var alerte = document.createElement('div');
+              if (validation.total > 0 && validation.invalides === 0) {
+                alerte.className = 'citation-alerte citation-alerte-ok';
+                alerte.textContent = 'Citations : ' + validation.valides + '/' + validation.total
+                  + ' retrouvées dans le compte rendu.';
+              } else if (validation.total === 0) {
+                alerte.className = 'citation-alerte citation-alerte-attention';
+                alerte.textContent = 'Aucune citation détectée — le texte doit en porter, vérifiez le brouillon.';
               } else {
-                html += '<br>Aucune citation détectée — le texte doit en porter, vérifiez le brouillon.';
+                alerte.className = 'citation-alerte citation-alerte-attention';
+                alerte.textContent = 'Citations : ' + validation.valides + '/' + validation.total
+                  + ' retrouvées. À vérifier avant publication :';
+                var liste = document.createElement('ul');
+                validation.citations.forEach(function (citation) {
+                  if (!citation.valide) {
+                    var element = document.createElement('li');
+                    element.textContent = '« ' + citation.texte + ' »';
+                    liste.appendChild(element);
+                  }
+                });
+                alerte.appendChild(liste);
               }
-              etat.innerHTML = html;
+              etat.appendChild(alerte);
             })
             .catch(function () {
               bouton.disabled = false;
