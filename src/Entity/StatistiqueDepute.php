@@ -17,13 +17,15 @@ use Doctrine\ORM\Mapping as ORM;
  * — impossible en ~20 ms. La commande `app:calcul:statistiques-deputes` remplit
  * cette table ; la fiche s'y lit en DBAL.
  *
- * Les votes nominatifs n'existant que pour la 17e législature (cf. CLAUDE.md),
- * cette table ne porte qu'elle : une fiche d'une législature antérieure n'a pas
- * de statistiques et se tait, au lieu d'afficher zéro.
+ * La table porte une ligne par (député, législature) : les votes nominatifs des
+ * législatures 14 à 16 sont importés des dépôts `Scrutins_XIV/XV/XVI_nettoye`,
+ * et leurs lignes, calculées une fois pour toutes, survivent au recalcul
+ * quotidien de la législature courante (la commande ne réécrit que la sienne).
  */
 #[ORM\Entity]
 #[ORM\Table(name: 'statistique_depute')]
 #[ORM\UniqueConstraint(name: 'uniq_statistique_depute', columns: ['depute_id', 'legislature'])]
+#[ORM\Index(name: 'idx_statistique_groupe', columns: ['groupe_id', 'legislature'])]
 class StatistiqueDepute
 {
     #[ORM\Id]
@@ -54,6 +56,15 @@ class StatistiqueDepute
     /** 1 si le député siège encore (mandat sans date de fin), 0 sinon. */
     #[ORM\Column(type: Types::SMALLINT)]
     private int $actif = 0;
+
+    /**
+     * Groupe du député pour cette législature (rattachement le plus récent,
+     * principal). `depute.groupe_id` ne porte que l'appartenance courante : sur
+     * une législature close, c'est cette colonne qui permet la moyenne de
+     * groupe de la fiche.
+     */
+    #[ORM\Column(nullable: true)]
+    private ?int $groupeId = null;
 
     public function getId(): ?int
     {
@@ -140,6 +151,18 @@ class StatistiqueDepute
     public function setActif(int $actif): static
     {
         $this->actif = $actif;
+
+        return $this;
+    }
+
+    public function getGroupeId(): ?int
+    {
+        return $this->groupeId;
+    }
+
+    public function setGroupeId(?int $groupeId): static
+    {
+        $this->groupeId = $groupeId;
 
         return $this;
     }

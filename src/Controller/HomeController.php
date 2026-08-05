@@ -46,6 +46,14 @@ class HomeController extends AbstractController
         'GDR', 'LFI-NFP', 'SOC', 'ECOS', 'EPR', 'DEM', 'HOR', 'LIOT', 'DR', 'UDDPLR', 'RN', 'NI',
     ];
 
+    /** Un député en exercice : un mandat encore ouvert, `%s` étant l'alias de `depute`. */
+    private const EN_EXERCICE = 'EXISTS (SELECT 1 FROM mandat m
+                                         WHERE m.depute_id = %s.id
+                                           AND m.legislature = :legislature
+                                           AND m.date_fin IS NULL)';
+
+    private const MUNICIPALES = 'municipales-2026';
+
     public function __construct(
         private readonly Connection $connection,
         private readonly SoutienGouvernement $soutienGouvernement,
@@ -81,6 +89,7 @@ class HomeController extends AbstractController
             'groupes_hemicycle' => $this->ordreHemicycle($groupes),
             'effectif_total' => array_sum(array_column($groupes, 'effectif')),
             'decryptages' => $this->derniersDecryptages(),
+            'election_municipales' => $this->electionMunicipales(),
             'explications' => $this->dernieresExplications(),
             'placeholder' => $this->placeholderRecherche(),
             'posts' => $this->derniersArticles(),
@@ -121,14 +130,73 @@ class HomeController extends AbstractController
             }
         }
 
+        // Les non-inscrits ne sont pas un groupe politique : le legacy les
+        // écarte du tirage (`libelle != 'Non inscrit'`, Groupes_model:191).
         $groupe = $this->connection->fetchAssociative(
             'SELECT libelle, libelle_abrev FROM groupe
              WHERE legislature = :legislature AND date_fin IS NULL
+               AND libelle_abrev != :nonInscrits
              ORDER BY RAND() LIMIT 1',
-            ['legislature' => Legislature::COURANTE],
+            ['legislature' => Legislature::COURANTE, 'nonInscrits' => self::NON_INSCRITS],
         );
 
         return $groupe === false ? 'Assemblée nationale' : $groupe['libelle'] . ' (' . $groupe['libelle_abrev'] . ')';
+    }
+
+    /**
+     * Bloc « Élections municipales 2026 » : compteurs et ventilation par groupe
+     * (Home::index du legacy, via Elections_model::count_candidats() et
+     * get_n_candidates_all_groups() sur la vue `candidate_full`).
+     *
+     * Le legacy ne compte que les candidats dont le député siège encore
+     * (`candidate_full.active`) : même critère ici par l'existence d'un mandat
+     * ouvert. L'effectif du groupe suit la même règle, comme `groupes_effectif`.
+     * Le tri s'arrête à la part décroissante, sans départage des égalités —
+     * c'est celui du legacy.
+     *
+     * La donnée vient d'`app:import:elections`, pas de la synchronisation
+     * quotidienne : sans import joué, le bloc disparaît au lieu d'afficher zéro.
+     *
+     * @return array{candidats: int, tetes: int, groupes: list<array<string, mixed>>}|null
+     */
+    private function electionMunicipales(): ?array
+    {
+        $actif = sprintf(self::EN_EXERCICE, 'd');
+        $effectif = '(SELECT COUNT(*) FROM depute d2 WHERE d2.groupe_id = g.id AND ' . sprintf(self::EN_EXERCICE, 'd2') . ')';
+
+        $compteurs = $this->connection->fetchAssociative(
+            "SELECT COUNT(*) AS candidats, COALESCE(SUM(c.position = 'Tête de liste'), 0) AS tetes
+             FROM candidature c
+             JOIN election e ON e.id = c.election_id
+             JOIN depute d ON d.id = c.depute_id
+             WHERE e.slug = :slug AND c.visible = 1 AND c.candidat = 1 AND $actif",
+            ['slug' => self::MUNICIPALES, 'legislature' => Legislature::COURANTE],
+        );
+
+        if ($compteurs === false || (int) $compteurs['candidats'] === 0) {
+            return null;
+        }
+
+        $groupes = $this->connection->fetchAllAssociative(
+            "SELECT g.libelle_abrev, g.legislature, COUNT(*) AS candidats,
+                    $effectif AS effectif,
+                    ROUND(COUNT(*) / $effectif * 100) AS pct,
+                    " . CouleurGroupe::SQL . ' AS couleur
+             FROM candidature c
+             JOIN election e ON e.id = c.election_id
+             JOIN depute d ON d.id = c.depute_id
+             JOIN groupe g ON g.id = d.groupe_id
+             WHERE e.slug = :slug AND c.visible = 1 AND c.candidat = 1 AND ' . $actif . '
+             GROUP BY g.id
+             ORDER BY pct DESC',
+            ['slug' => self::MUNICIPALES, 'legislature' => Legislature::COURANTE],
+        );
+
+        return [
+            'candidats' => (int) $compteurs['candidats'],
+            'tetes' => (int) $compteurs['tetes'],
+            'groupes' => $groupes,
+        ];
     }
 
     /**

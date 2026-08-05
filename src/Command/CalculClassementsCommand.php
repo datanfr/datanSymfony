@@ -130,6 +130,10 @@ class CalculClassementsCommand extends Command
             $lignes[$type] = $classement;
         }
 
+        [$commissionDeputes, $commissionGroupes] = $this->participationCommission($legislature);
+        $lignes[TypeClassement::DeputesParticipationCommission->value] = $commissionDeputes;
+        $lignes[TypeClassement::GroupesParticipationCommission->value] = $commissionGroupes;
+
         $lignes[TypeClassement::DeputesLoyaute->value] = $this->loyauteDeputes($legislature);
         $lignes[TypeClassement::DeputesAge->value] = $this->ageDeputes($legislature);
         $lignes[TypeClassement::GroupesCohesion->value] = $this->cohesionGroupes($legislature);
@@ -279,6 +283,307 @@ class CalculClassementsCommand extends Command
         }
 
         return $classements;
+    }
+
+    /**
+     * Le score « Votes par spécialisation » : participation d'un député aux
+     * scrutins portant sur des textes examinés dans sa commission permanente
+     * (`class_participation_commission` du legacy, daily.php:2357 et 2448).
+     *
+     * Un scrutin compte pour un député si son dossier porte une commission au
+     * fond (`dossier.commission_fond`, acte AN1-COM-FOND) et si le député était
+     * membre de cette commission ce jour-là — la qualité « Membre » seule, comme
+     * le `codeQualite = "Membre"` d'origine : un président ou un rapporteur
+     * spécial porte une autre qualité et sort du calcul. Les motions de censure
+     * restent écartées, comme du score général.
+     *
+     * Trois règles héritées du score général, non négociables :
+     * - le dénominateur compte les scrutins TENUS, pas les scrutins votés : il
+     *   se borne par l'adhésion à la commission croisée avec les périodes de
+     *   présence de {@see fenetresDeSession} (fonction_groupe, jamais mandat) ;
+     * - un scrutin où le député est non-votant sort du dénominateur ;
+     * - le pourcentage affiché se refait sur numérateur et dénominateur entiers,
+     *   le score stocké n'étant qu'un DECIMAL(8,3).
+     *
+     * Le second classement retourné est celui des groupes : la moyenne des
+     * scores de leurs membres (`groupeStats`, daily.php:2645), chaque score
+     * étant préalablement arrondi à deux décimales — c'est la précision de
+     * `class_participation_commission.score`, et l'arrondi entre dans la
+     * moyenne. Les membres sont rattachés à leur groupe le plus récent de la
+     * législature, députés partis compris : le legacy moyenne `deputes_all`
+     * sans filtre d'activité, et les ministres sortis du Palais Bourbon pèsent
+     * dans la moyenne de leur ancien groupe.
+     *
+     * Trois écarts assumés face à la page vivante de datan.fr (04/08/2026,
+     * têtes de classement et scores identiques à ±1 point par ailleurs) :
+     * - nos « nombre de votes » dépassent les siens de ~3 % : sa table
+     *   `votes_participation_commission` est incrémentale et jamais revisitée
+     *   (`voteNumero > dernier traité`), un scrutin dont le dossier ou la
+     *   commission n'arrive qu'après coup lui échappe pour toujours — notre
+     *   recalcul complet le voit ;
+     * - son tableau liste 584 lignes pour 577 sièges : neuf réélus y figurent
+     *   deux fois, `get_mps_participation_commission` joignant
+     *   `class_participation_commission` sans filtrer sa législature. Défaut,
+     *   pas choix : corrigé ;
+     * - la présidente de l'Assemblée apparaît chez nous (une poignée de votes
+     *   à 100 %) et pas chez lui — c'est l'exception nommée `PA721908`,
+     *   délibérément non reprise (cf. {@see participationDeputes}).
+     *
+     * @return array{0: list<array{id: int, score: float, numerateur: int, denominateur: int, tri: array<int|string>}>,
+     *               1: list<array{id: int, score: float, numerateur: null, denominateur: int, tri: array<int|string>}>}
+     */
+    private function participationCommission(int $legislature): array
+    {
+        // Dates (triées) des scrutins éligibles, par commission au fond.
+        $scrutins = $this->connection->fetchAllAssociative(
+            'SELECT c.id AS commission_id, DATE(s.date_scrutin) AS jour
+             FROM scrutin s
+             JOIN dossier dos ON dos.id = s.dossier_id
+             JOIN commission c ON c.uid = dos.commission_fond
+             WHERE s.legislature = :legislature
+               AND (s.code_type_vote IS NULL OR s.code_type_vote <> :motion)
+             ORDER BY c.id, s.date_scrutin',
+            ['legislature' => $legislature, 'motion' => self::MOTION_CENSURE],
+        );
+
+        if ($scrutins === []) {
+            return [[], []];
+        }
+
+        $datesParCommission = [];
+        foreach ($scrutins as $ligne) {
+            $datesParCommission[(int) $ligne['commission_id']][] = $ligne['jour'];
+        }
+
+        // Adhésions « Membre » aux commissions permanentes, par député puis par
+        // commission — un député en cumule plusieurs par législature, l'Assemblée
+        // fermant et rouvrant le mandat à chaque remplacement.
+        $adhesions = $this->connection->fetchAllAssociative(
+            'SELECT fc.depute_id, fc.commission_id, fc.date_debut,
+                    COALESCE(fc.date_fin, :sansFin) AS date_fin
+             FROM fonction_commission fc
+             WHERE fc.legislature = :legislature AND fc.code_qualite = :membre
+               AND fc.date_debut IS NOT NULL
+             ORDER BY fc.depute_id, fc.commission_id, fc.date_debut',
+            [
+                'legislature' => $legislature,
+                'membre' => 'Membre',
+                'sansFin' => self::SANS_FIN,
+            ],
+        );
+
+        $parDeputeEtCommission = [];
+        foreach ($adhesions as $ligne) {
+            $parDeputeEtCommission[(int) $ligne['depute_id']][(int) $ligne['commission_id']][] =
+                [$ligne['date_debut'], $ligne['date_fin']];
+        }
+
+        $fenetres = $this->fenetresDeSession($legislature, $this->bornesDeVote($legislature));
+
+        // Scrutins tenus « dans sa commission » pour chaque député : l'adhésion
+        // croisée avec sa présence à l'Assemblée. Un scrutin appartient à une
+        // seule commission au fond, les comptes s'additionnent donc sans doublon.
+        $tenus = [];
+        foreach ($parDeputeEtCommission as $deputeId => $commissions) {
+            $total = 0;
+
+            foreach ($commissions as $commissionId => $intervalles) {
+                $dates = $datesParCommission[$commissionId] ?? [];
+                if ($dates === []) {
+                    continue;
+                }
+
+                foreach ($this->intersecte($this->fusionne($intervalles), $fenetres[$deputeId] ?? []) as [$debut, $fin]) {
+                    $total += $this->borne($dates, $fin, true) - $this->borne($dates, $debut, false);
+                }
+            }
+
+            if ($total > 0) {
+                $tenus[$deputeId] = $total;
+            }
+        }
+
+        // Votes exprimés et retraits (non-votants) sur ces mêmes scrutins. Le
+        // GROUP BY intermédiaire dédouble ce que la jointure sur les adhésions
+        // multiplierait si deux mandats de commission se chevauchaient.
+        $comptes = $this->connection->fetchAllAssociative(
+            'SELECT t.depute_id,
+                    SUM(t.exprime) AS exprimes,
+                    SUM(t.retire) AS retires
+             FROM (SELECT v.depute_id, v.scrutin_id,
+                          MAX(v.position IN ' . self::EXPRIMES . ') AS exprime,
+                          MAX(v.position = :non_votant) AS retire
+                   FROM vote v
+                   JOIN scrutin s ON s.id = v.scrutin_id
+                   JOIN dossier dos ON dos.id = s.dossier_id
+                   JOIN commission c ON c.uid = dos.commission_fond
+                   JOIN fonction_commission fc ON fc.commission_id = c.id
+                        AND fc.depute_id = v.depute_id
+                        AND fc.legislature = :legislature
+                        AND fc.code_qualite = :membre
+                        AND fc.date_debut IS NOT NULL
+                        AND fc.date_debut <= DATE(v.scrutin_date)
+                        AND (fc.date_fin IS NULL OR fc.date_fin >= DATE(v.scrutin_date))
+                   WHERE v.vote_type = :type AND s.legislature = :legislature
+                     AND (s.code_type_vote IS NULL OR s.code_type_vote <> :motion)
+                   GROUP BY v.depute_id, v.scrutin_id) t
+             GROUP BY t.depute_id',
+            [
+                'legislature' => $legislature,
+                'membre' => 'Membre',
+                'type' => self::OFFICIEL,
+                'motion' => self::MOTION_CENSURE,
+                'non_votant' => self::NON_VOTANT,
+            ],
+        );
+
+        $parDepute = [];
+        foreach ($comptes as $ligne) {
+            $parDepute[(int) $ligne['depute_id']] = $ligne;
+        }
+
+        // Score de chaque député ayant eu au moins un scrutin à sa portée —
+        // y compris les députés partis, dont les groupes ont besoin.
+        $scores = [];
+        foreach ($tenus as $deputeId => $total) {
+            $ligne = $parDepute[$deputeId] ?? null;
+            $denominateur = $total - (int) ($ligne['retires'] ?? 0);
+
+            if ($denominateur <= 0) {
+                continue;
+            }
+
+            $scores[$deputeId] = [
+                'numerateur' => (int) ($ligne['exprimes'] ?? 0),
+                'denominateur' => $denominateur,
+            ];
+        }
+
+        $deputes = $this->deputesEnExercice($legislature);
+        $classementDeputes = [];
+
+        foreach ($scores as $deputeId => $score) {
+            if (!isset($deputes[$deputeId])) {
+                continue;
+            }
+
+            $classementDeputes[] = [
+                'id' => $deputeId,
+                'score' => $score['numerateur'] / $score['denominateur'],
+                'numerateur' => $score['numerateur'],
+                'denominateur' => $score['denominateur'],
+                'tri' => [-$score['denominateur'], $deputes[$deputeId]],
+            ];
+        }
+
+        return [$classementDeputes, $this->groupesParticipationCommission($legislature, $scores)];
+    }
+
+    /**
+     * Moyenne par groupe des scores « Votes par spécialisation » de ses membres,
+     * rattachés par leur fonction de groupe la plus récente de la législature —
+     * la règle du site (encore ouvert d'abord, puis date de fin la plus tardive),
+     * qui garde les députés partis dans la moyenne de leur dernier groupe.
+     *
+     * @param array<int, array{numerateur: int, denominateur: int}> $scores
+     *
+     * @return list<array{id: int, score: float, numerateur: null, denominateur: int, tri: array<int|string>}>
+     */
+    private function groupesParticipationCommission(int $legislature, array $scores): array
+    {
+        if ($scores === []) {
+            return [];
+        }
+
+        $rattachements = $this->connection->fetchAllKeyValue(
+            'SELECT depute_id, groupe_id FROM (
+                SELECT fg.depute_id, fg.groupe_id,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY fg.depute_id
+                           ORDER BY (fg.date_fin IS NOT NULL), fg.date_fin DESC, fg.date_debut DESC
+                       ) AS rang
+                FROM fonction_groupe fg
+                JOIN groupe g ON g.id = fg.groupe_id AND g.legislature = :legislature
+                WHERE fg.nomin_principale = 1
+             ) classes WHERE rang = 1',
+            ['legislature' => $legislature],
+        );
+
+        $sommes = [];
+        foreach ($scores as $deputeId => $score) {
+            $groupeId = $rattachements[$deputeId] ?? null;
+            if ($groupeId === null) {
+                continue;
+            }
+
+            $sommes[(int) $groupeId] ??= ['scores' => 0.0, 'votes' => 0, 'n' => 0];
+            // L'arrondi à deux décimales AVANT la moyenne n'est pas cosmétique :
+            // c'est la précision du score stocké par le legacy, et elle entre
+            // dans la moyenne du groupe.
+            $sommes[(int) $groupeId]['scores'] += round($score['numerateur'] / $score['denominateur'], 2);
+            $sommes[(int) $groupeId]['votes'] += $score['denominateur'];
+            ++$sommes[(int) $groupeId]['n'];
+        }
+
+        // Seuls les groupes encore constitués font une ligne, comme les autres
+        // classements de groupes (le site calcule pour tous mais n'affiche que
+        // `active = 1`). Un député parti dont le dernier groupe est dissous —
+        // UDR avant son renommage en UDDPLR — pèse chez le site dans la ligne
+        // du groupe dissous, jamais affichée : l'écarter revient au même.
+        $actifs = array_flip(array_map('intval', $this->connection->fetchFirstColumn(
+            'SELECT id FROM groupe WHERE legislature = :legislature AND date_fin IS NULL',
+            ['legislature' => $legislature],
+        )));
+
+        $agreges = [];
+        foreach ($sommes as $groupeId => $somme) {
+            if (!isset($actifs[$groupeId])) {
+                continue;
+            }
+
+            $agreges[] = [
+                'id' => $groupeId,
+                'moyenne' => $somme['scores'] / $somme['n'],
+                // Le « nombre de votes » du groupe est la moyenne de ceux de ses
+                // membres, arrondie — le `round(avg(votesN))` d'origine.
+                'votes' => (int) round($somme['votes'] / $somme['n']),
+            ];
+        }
+
+        return $this->classementGroupes($agreges, static fn (array $l) => [
+            'score' => (float) $l['moyenne'],
+            'numerateur' => null,
+            'denominateur' => (int) $l['votes'],
+        ]);
+    }
+
+    /**
+     * Croise deux listes d'intervalles de dates : les périodes couvertes par
+     * l'une ET par l'autre. Sert à borner une adhésion de commission par les
+     * périodes de présence du député — être membre d'une commission pendant une
+     * charge ministérielle ne fait pas assister aux scrutins.
+     *
+     * @param list<array{0: string, 1: string}> $a triés par début
+     * @param list<array{0: string, 1: string}> $b triés par début
+     *
+     * @return list<array{0: string, 1: string}>
+     */
+    private function intersecte(array $a, array $b): array
+    {
+        $croises = [];
+
+        foreach ($a as [$debutA, $finA]) {
+            foreach ($b as [$debutB, $finB]) {
+                $debut = max($debutA, $debutB);
+                $fin = min($finA, $finB);
+
+                if ($debut <= $fin) {
+                    $croises[] = [$debut, $fin];
+                }
+            }
+        }
+
+        return $croises;
     }
 
     /**

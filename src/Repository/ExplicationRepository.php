@@ -16,9 +16,9 @@ class ExplicationRepository extends ServiceEntityRepository
     /**
      * Un député n'explique que les scrutins décryptés par la rédaction, et
      * seulement à partir de la 16e législature (`DashboardMP_model::
-     * get_votes_to_explain`). Nos votes nominatifs ne couvrant que la 17e, le
-     * seuil ne retranche rien aujourd'hui — il est repris tel quel pour que la
-     * règle survive à l'arrivée d'une législature antérieure.
+     * get_votes_to_explain`). Le seuil n'est pas décoratif depuis que `vote`
+     * couvre les législatures 14 à 17 : sans lui, les scrutins décryptés de la
+     * 15e rouvriraient un droit d'explication que le site n'a jamais offert.
      */
     private const LEGISLATURE_MINIMALE = 16;
 

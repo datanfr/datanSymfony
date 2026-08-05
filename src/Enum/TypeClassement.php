@@ -19,6 +19,13 @@ enum TypeClassement: string
     /** Députés, participation à tous les scrutins de la législature. */
     case DeputesParticipationTous = 'deputes_participation_tous';
 
+    /**
+     * Députés, participation aux scrutins des textes examinés dans leur
+     * commission (« Votes par spécialisation », `class_participation_commission`
+     * de l'application d'origine).
+     */
+    case DeputesParticipationCommission = 'deputes_participation_commission';
+
     /** Députés, part des votes conformes à la position majoritaire de leur groupe. */
     case DeputesLoyaute = 'deputes_loyaute';
 
@@ -30,6 +37,9 @@ enum TypeClassement: string
     case GroupesParticipation = 'groupes_participation';
 
     case GroupesParticipationTous = 'groupes_participation_tous';
+
+    /** Groupes, moyenne des scores « Votes par spécialisation » de leurs membres. */
+    case GroupesParticipationCommission = 'groupes_participation_commission';
 
     case GroupesAge = 'groupes_age';
 
@@ -57,7 +67,7 @@ enum TypeClassement: string
     public function decimalesDuScore(): int
     {
         return match ($this) {
-            self::DeputesParticipation, self::DeputesParticipationTous => 2,
+            self::DeputesParticipation, self::DeputesParticipationTous, self::DeputesParticipationCommission => 2,
             default => 3,
         };
     }

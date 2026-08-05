@@ -285,13 +285,23 @@ class ClassementController extends AbstractController
     private function deputesParticipation(): array
     {
         $solennels = $this->classementDeputes(TypeClassement::DeputesParticipation);
+        $commission = $this->classementDeputesCommission();
         $tous = $this->classementDeputes(TypeClassement::DeputesParticipationTous);
         $miseEnAvant = $this->assezDeSolennels() ? $solennels : $tous;
 
         return [
             'solennels' => $solennels,
+            'commission' => $commission,
             'tous' => $tous,
             'moyenne_solennels' => $this->moyenne(TypeClassement::DeputesParticipation),
+            // La moyenne de ce que le tableau montre : les députés en exercice
+            // membres d'une commission. Le site moyenne toute sa table, anciens
+            // députés et sans-commission compris — même divergence assumée que
+            // les deux autres moyennes de participation (« nous moyennons ce
+            // que nous montrons », cf. TODO.md).
+            'moyenne_commission' => $commission === []
+                ? 0.0
+                : array_sum(array_column($commission, 'score')) / \count($commission),
             'moyenne_tous' => $this->moyenne(TypeClassement::DeputesParticipationTous),
             'nombre_solennels' => $this->nombreSolennels(),
             'seuil_solennels' => self::SEUIL_SOLENNELS,
@@ -308,6 +318,7 @@ class ClassementController extends AbstractController
     private function groupesParticipation(): array
     {
         $solennels = $this->classementGroupes(TypeClassement::GroupesParticipation);
+        $commission = $this->classementGroupes(TypeClassement::GroupesParticipationCommission);
         $tous = $this->classementGroupes(TypeClassement::GroupesParticipationTous);
 
         // Contrairement à la cohésion, cette page garde les non-inscrits dans
@@ -319,8 +330,10 @@ class ClassementController extends AbstractController
 
         return [
             'solennels' => $solennels,
+            'commission' => $commission,
             'tous' => $tous,
             'moyenne_solennels' => $this->moyenne(TypeClassement::GroupesParticipation),
+            'moyenne_commission' => $this->moyenne(TypeClassement::GroupesParticipationCommission),
             'moyenne_tous' => $this->moyenne(TypeClassement::GroupesParticipationTous),
             'nombre_solennels' => $this->nombreSolennels(),
             'seuil_solennels' => self::SEUIL_SOLENNELS,
@@ -394,6 +407,53 @@ class ClassementController extends AbstractController
         return $type === TypeClassement::DeputesAge
             ? $this->numerote($deputes)
             : $this->classeAuScoreExact($deputes, $type->decimalesDuScore());
+    }
+
+    /**
+     * Le classement « Votes par spécialisation », avec la commission actuelle de
+     * chaque député — la colonne que l'onglet affiche en plus des autres.
+     *
+     * La jointure sur l'adhésion encore ouverte n'apporte pas que le libellé :
+     * elle filtre. Le site ne montre que les députés membres d'une commission
+     * au moment du rendu (`get_mps_participation_commission` exige un
+     * `mandat_secondaire` COMPER « Membre » sans date de fin), et son RANK()
+     * porte sur cette population filtrée — le nôtre aussi, le rang se refaisant
+     * ici sur les entiers.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function classementDeputesCommission(): array
+    {
+        $type = TypeClassement::DeputesParticipationCommission;
+
+        $lignes = $this->connection->fetchAllAssociative(
+            'SELECT c.rang, c.score, c.numerateur, c.denominateur,
+                    d.mp_id, d.firstname, d.lastname, d.slug, d.dpt_slug, d.civilite,
+                    d.departement_nom, d.departement_code,
+                    g.legislature, g.libelle AS groupe_libelle, g.libelle_abrev AS groupe_abrev,
+                    ' . CouleurGroupe::SQL . ' AS groupe_couleur,
+                    com.libelle_abrege AS commission
+             FROM classement c
+             JOIN depute d ON d.id = c.depute_id
+             LEFT JOIN groupe g ON g.id = d.groupe_id
+             JOIN (SELECT depute_id, commission_id,
+                          ROW_NUMBER() OVER (PARTITION BY depute_id
+                                             ORDER BY date_debut DESC, id DESC) AS rang
+                   FROM fonction_commission
+                   WHERE legislature = :legislature AND code_qualite = :membre
+                     AND date_fin IS NULL) fc
+               ON fc.depute_id = d.id AND fc.rang = 1
+             JOIN commission com ON com.id = fc.commission_id
+             WHERE c.type = :type AND c.legislature = :legislature
+             ORDER BY c.rang, c.id',
+            [
+                'type' => $type->value,
+                'legislature' => Legislature::COURANTE,
+                'membre' => 'Membre',
+            ],
+        );
+
+        return $this->classeAuScoreExact(array_map($this->decore(...), $lignes), $type->decimalesDuScore());
     }
 
     /**

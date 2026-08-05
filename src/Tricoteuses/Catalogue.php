@@ -37,6 +37,28 @@ final class Catalogue
                 self::BASE . 'assemblee-nettoye/Scrutins_XVII_nettoye.git',
                 'Scrutins de la 17e législature, ventilations et votes nominatifs',
             ),
+            // Les scrutins des législatures closes : dépôts figés (dernier
+            // commit de Scrutins_XVI en 2024), importés une fois pour toutes
+            // par `app:import:scrutins --depot=scrutins-xiv --tout` — d'où le
+            // `quotidien: false` qui les tient hors de la moisson nocturne.
+            'scrutins-xiv' => new Depot(
+                'scrutins-xiv',
+                self::BASE . 'assemblee-nettoye/Scrutins_XIV_nettoye.git',
+                'Scrutins de la 14e législature (2012-2017), close',
+                quotidien: false,
+            ),
+            'scrutins-xv' => new Depot(
+                'scrutins-xv',
+                self::BASE . 'assemblee-nettoye/Scrutins_XV_nettoye.git',
+                'Scrutins de la 15e législature (2017-2022), close',
+                quotidien: false,
+            ),
+            'scrutins-xvi' => new Depot(
+                'scrutins-xvi',
+                self::BASE . 'assemblee-nettoye/Scrutins_XVI_nettoye.git',
+                'Scrutins de la 16e législature (2022-2024), close',
+                quotidien: false,
+            ),
             'amendements' => new Depot(
                 'amendements',
                 self::BASE . 'assemblee-nettoye/Amendements_XVII_nettoye.git',

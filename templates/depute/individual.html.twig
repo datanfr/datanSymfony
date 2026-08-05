@@ -41,11 +41,11 @@
     </div>
 
     <div class="col-md-10 col-lg-8 offset-md-1 offset-lg-0 pl-lg-5">
-      {# Encarts de tête (`electionFeature` / `voteFeature`). Le bandeau
-         « Municipales 2026 » (`electionFeature.php`) n'est PAS porté : sa donnée
-         (candidatures municipales 2026, élection `id = 7`) est le chantier en
-         cours du legacy, laissé de côté (cf. CLAUDE.md, TODO). Le « dernier vote
-         important », lui, l'est. #}
+      {# Encarts de tête, dans l'ordre du site : « Municipales 2026 » puis le
+         « dernier vote important » (`electionFeature.php` / `voteFeature.php`).
+         La donnée du premier est en base depuis le 31 juillet 2026
+         (`app:import:elections`, élection `municipales-2026`). #}
+      {{ include('depute/_election_feature.html.twig') }}
       {{ include('depute/_vote_feature.html.twig') }}
 
       {# Ordre repris de `deputes/individual.php` : encart campagne, biographie,

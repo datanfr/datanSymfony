@@ -16,11 +16,11 @@ use Symfony\Component\Console\Style\SymfonyStyle;
  * éditoriale figée, cf. ComportementDepute::VOTES_CLES) : l'IVG dans la
  * Constitution (n° 629) et le projet de loi immigration (n° 3213).
  *
- * `vote` ne couvre que la 17e législature (dépôt Scrutins_XVII_nettoye) et ce
- * n'est PAS cet import qui change la règle : deux scrutins ne font pas une
- * couverture, et toutes les statistiques restent bornées à la 17e (les requêtes
- * qui comptent des votes filtrent la législature). Seul le bloc des positions
- * importantes lit ces lignes-là.
+ * Écrite quand `vote` ne couvrait que la 17e législature, pour servir le seul
+ * bloc des positions importantes. Depuis l'import des dépôts
+ * Scrutins_XIV/XV/XVI_nettoye (`app:import:scrutins --depot=scrutins-xvi
+ * --tout`), ces deux scrutins arrivent avec tous les autres : la commande est
+ * redondante — et inoffensive, son upsert réécrivant les mêmes lignes.
  *
  * Fichiers à régénérer depuis le dépôt des Tricoteuses (législature close, ils
  * ne bougent plus) :

@@ -47,6 +47,39 @@ class LienScrutinsCommand extends ImportTricoteusesCommand
     private const AMENDEMENT_FANTOME = 'NULL';
 
     /**
+     * Rattachements arbitrés à la main (31 juillet 2026), appliqués d'autorité :
+     * aucune des voies automatiques ne sait les produire, et l'une d'elles
+     * produit même l'inverse.
+     *
+     * Les dossiers d'abord. Sur ces pages, le site de l'Assemblée affiche
+     * lui-même un dossier qui n'est pas celui du texte mis aux voix (le
+     * scrutin 15/2769 vote « l'éthique de l'urgence », sa page renvoie au
+     * dossier de la prime de naissance) : un scrape de rattrapage les
+     * reprendrait fautifs à chaque rejeu sur base neuve. L'objet du scrutin,
+     * qui nomme le texte en toutes lettres, tranche — il coïncide avec le
+     * rattachement de datan.fr. Le vote du Congrès (VTCGR5L16V1) est à part :
+     * sans séance de l'Assemblée ni page de scrutin, aucune voie ne le couvre.
+     *
+     * Les deux amendements ensuite : leurs pages de scrutin n'affichent plus
+     * de lien, et la jointure par séance de discussion ne les trouve pas ;
+     * l'objet nomme pourtant l'amendement sans ambiguïté (« n° 570 de
+     * M. Jacobelli », « n° 1 de M. Breton ») et le numéro comme le texte
+     * concordent avec l'amendement retenu — le même que datan.fr.
+     */
+    private const RATTACHEMENTS_ARBITRES = [
+        'VTANR5L15V117' => ['dossier' => 'DLR5L15N35824'],
+        'VTANR5L15V119' => ['dossier' => 'DLR5L15N35824'],
+        'VTANR5L15V2769' => ['dossier' => 'DLR5L15N39819'],
+        'VTANR5L15V3640' => ['dossier' => 'DLR5L15N41668'],
+        'VTANR5L16V1162' => ['dossier' => 'DLR5L16N46622'],
+        'VTANR5L16V2984' => ['dossier' => 'DLR5L16N47781'],
+        'VTANR5L17V6758' => ['dossier' => 'DLR5L17N54085'],
+        'VTCGR5L16V1' => ['dossier' => 'DLR5L16N49095'],
+        'VTANR5L17V6288' => ['amendement' => 'AMANR5L17PO838901BTC2695P0D1N000570'],
+        'VTANR5L17V7231' => ['amendement' => 'AMANR5L17PO838901BTC2835P0D1N000001'],
+    ];
+
+    /**
      * Mots trop répandus dans un objet de scrutin pour distinguer un auteur.
      * Sans eux, « l'amendement de suppression n° 828 » rapprocherait n'importe
      * quel amendement de suppression.
@@ -105,6 +138,11 @@ class LienScrutinsCommand extends ImportTricoteusesCommand
         $purges = $this->purgeFantome();
         if ($purges > 0) {
             $io->text(sprintf('%d rattachements fictifs remis à zéro avant réappariement.', $purges));
+        }
+
+        $arbitres = $this->appliqueArbitrages();
+        if ($arbitres > 0) {
+            $io->text(sprintf('%d rattachements arbitrés appliqués.', $arbitres));
         }
 
         $scrutins = $this->scrutinsATraiter($depotScrutins, $tout);
@@ -185,6 +223,41 @@ class LienScrutinsCommand extends ImportTricoteusesCommand
         $this->connection->executeStatement('DELETE FROM amendement WHERE id = ?', [$id]);
 
         return $delies;
+    }
+
+    /**
+     * Applique {@see self::RATTACHEMENTS_ARBITRES}, sans condition : ces liens
+     * priment sur toute voie automatique, y compris un rattachement déjà posé —
+     * c'est leur raison d'être. Idempotent, l'UPDATE ne compte que ce qui
+     * change. Un uid absent de la base (rejeu partiel) est simplement ignoré.
+     */
+    private function appliqueArbitrages(): int
+    {
+        $changes = 0;
+
+        foreach (self::RATTACHEMENTS_ARBITRES as $uid => $liens) {
+            foreach (['dossier' => 'dossier_id', 'amendement' => 'amendement_id'] as $cle => $colonne) {
+                if (!isset($liens[$cle])) {
+                    continue;
+                }
+
+                $id = $this->connection->fetchOne(
+                    sprintf('SELECT id FROM %s WHERE %s = ?', $cle, $cle === 'dossier' ? 'dossier_id' : 'amendement_id'),
+                    [$liens[$cle]],
+                );
+
+                if ($id === false || $id === null) {
+                    continue;
+                }
+
+                $changes += (int) $this->connection->executeStatement(
+                    sprintf('UPDATE scrutin SET %1$s = ? WHERE uid = ? AND (%1$s IS NULL OR %1$s <> ?)', $colonne),
+                    [$id, $uid, $id],
+                );
+            }
+        }
+
+        return $changes;
     }
 
     /**

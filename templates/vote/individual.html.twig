@@ -235,6 +235,36 @@
   </div>
 {% endif %}
 
+{# Bloc « L'auteur de l'amendement » (`votes/individual.php:268-328`) : la
+   carte du député auteur, ou celle — nue — du Gouvernement. Le texte
+   d'explication est celui du contrôleur d'origine (`Votes::index`). #}
+{% if auteur_amendement %}
+  <div class="container-fluid pg-vote-individual bloc-author py-4">
+    <div class="container">
+      <div class="row">
+        <div class="col-lg-7 d-flex flex-column justify-content-center">
+          <h2 class="title text-center text-lg-left">L'auteur{{ auteur_amendement.type == 'depute' and auteur_amendement.depute.civilite == 'Mme' ? 'e' : '' }} de l'amendement</h2>
+          <p class="text-center text-lg-left">Un amendement est un texte, déposé par un ou plusieurs députés, qui vise à modifier un projet ou une proposition de loi. Il y a un auteur principal, mais un amendement peut être cosigné par plusieurs députés.</p>
+        </div>
+        <div class="col-lg-5 d-flex align-items-center justify-content-center pb-4">
+          {% if auteur_amendement.type == 'depute' %}
+            {{ include('depute/partials/card.html.twig', {depute: auteur_amendement.depute}) }}
+          {% else %}
+            <div class="card card-depute mx-2">
+              <div class="card-body d-flex flex-column align-items-center justify-content-center">
+                <div>
+                  <h3 class="d-block card-title">Gouvernement {{ auteur_amendement.nom }}</h3>
+                  <span class="d-block">Formé le {{ auteur_amendement.date_debut|date_fr }}</span>
+                </div>
+              </div>
+            </div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+{% endif %}
+
 <div class="container pg-vote-individual mb-5">
   <div class="row">
     <div class="col-12">
@@ -342,7 +372,13 @@
           <p class="mt-4 font-italic">L'objectif d'un amendement est de modifier ou d'ajouter une mesure d'un projet ou d'une proposition de loi. Le ou les députés qui rédigent l'amendement écrivent également un exposé des motifs.</p>
           <div class="card">
             <div class="card-body" id="exposeMotifs">
-              {% if '<p>' in scrutin.amendement_expose %}
+              {# Le test porte sur `<p` SANS chevron fermant : 2 359 des 7 200
+                 exposés mis aux voix ouvrent par `<p style="text-align:…">`,
+                 que la garde `'<p>'` ne reconnaissait pas — tout leur HTML
+                 sortait échappé, balises et entités visibles en toutes lettres.
+                 Le repli n'existe que pour un éventuel exposé en texte nu ;
+                 aucun des exposés liés à un scrutin n'en est un aujourd'hui. #}
+              {% if '<p' in scrutin.amendement_expose %}
                 {{ scrutin.amendement_expose|raw }}
               {% else %}
                 <p>{{ scrutin.amendement_expose }}</p>
@@ -470,7 +506,15 @@
 {% endblock %}
 
 {% block javascripts %}
+  {# L'ordre compte (cf. TODO §4) : `moment.min.js` AVANT le bundle — son
+     initialisation des deux tables appelle `$.fn.dataTable.moment` — et
+     `datetime-moment.js`, greffon de DataTables, APRÈS lui. Sans ces deux
+     fichiers, l'initialisation mourait en silence : les tableaux des votes
+     perdaient tri, recherche et pagination sur toutes les pages de scrutin,
+     sans une trace côté serveur. Même trio que `depute/votes.html.twig`. #}
+  <script src="{{ asset('assets/js/libraries/moment/moment.min.js') }}"></script>
   <script src="{{ asset('assets/js/dist/datatable-datan.min.js') }}"></script>
+  <script src="{{ asset('assets/js/libraries/datetime/datetime-moment.js') }}"></script>
   <script>
     new Chart(document.getElementById('pie-chart'), {
       type: 'pie',

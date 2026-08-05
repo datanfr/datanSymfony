@@ -74,6 +74,17 @@ class Dossier
     public const PROCEDURES_GOUVERNEMENT = [1, 21];
 
     /**
+     * Organe de la commission saisie au fond (ex. « PO59048 »), lu dans l'acte
+     * `AN1-COM-FOND` du dossier. Fonde le score « Votes par spécialisation » :
+     * la participation d'un député aux scrutins des textes examinés dans sa
+     * commission. Nul pour un dossier jamais renvoyé en commission (86 % des
+     * scrutins de la 17e ont un dossier qui le porte).
+     */
+    #[ORM\Column(length: 25, nullable: true)]
+    #[Groups(['dossier:read', 'dossier:write'])]
+    private ?string $commissionFond = null;
+
+    /**
      * @var Collection<int, Scrutin>
      */
     #[ORM\OneToMany(targetEntity: Scrutin::class, mappedBy: 'dossier')]
@@ -157,6 +168,18 @@ class Dossier
     public function setProcedureCode(?int $procedureCode): static
     {
         $this->procedureCode = $procedureCode;
+
+        return $this;
+    }
+
+    public function getCommissionFond(): ?string
+    {
+        return $this->commissionFond;
+    }
+
+    public function setCommissionFond(?string $commissionFond): static
+    {
+        $this->commissionFond = $commissionFond;
 
         return $this;
     }

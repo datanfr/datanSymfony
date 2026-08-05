@@ -95,9 +95,12 @@
           {{ include('groupe/partials/pas_assez.html.twig') }}
         {% else %}
           <p>
-            {{ actif ? 'Depuis le début de' : 'Pendant la' }} {{ groupe.legislature }}ème législature, le taux de cohésion du groupe <i>{{ titre_groupe }}</i> {{ actif ? 'est' : 'était' }} de <span class="font-weight-bold text-primary">{{ comportement.cohesion_moyenne|round(2) }}</span>. Plus ce score de cohésion est proche de 1, plus le groupe est uni quand il s'agit de voter en séance publique.
+            {# Virgule décimale française (« 0,95 » où le site écrit « 0.95 ») :
+               correction typographique assumée, la règle des pages de
+               classement (`number_format(n, ',', ' ')`) — cf. TODO §4. #}
+            {{ actif ? 'Depuis le début de' : 'Pendant la' }} {{ groupe.legislature }}ème législature, le taux de cohésion du groupe <i>{{ titre_groupe }}</i> {{ actif ? 'est' : 'était' }} de <span class="font-weight-bold text-primary">{{ comportement.cohesion_moyenne|number_format(2, ',', ' ') }}</span>. Plus ce score de cohésion est proche de 1, plus le groupe est uni quand il s'agit de voter en séance publique.
           </p>
-          <p>Le groupe <i>{{ titre_groupe }}</i> {{ actif ? 'peut' : 'pouvait' }} être considéré comme <b>{{ edito.cohesion.absolute }} soudé</b> quand il s'{{ actif ? 'agit' : 'agissait' }} de voter. En effet, le groupe {{ actif ? 'est' : 'était' }} {{ edito.cohesion.relative }} soudé que la moyenne des autres groupes, qui {{ actif ? 'est' : 'était' }} de {{ moyennes.cohesion|round(2) }}.</p>
+          <p>Le groupe <i>{{ titre_groupe }}</i> {{ actif ? 'peut' : 'pouvait' }} être considéré comme <b>{{ edito.cohesion.absolute }} soudé</b> quand il s'{{ actif ? 'agit' : 'agissait' }} de voter. En effet, le groupe {{ actif ? 'est' : 'était' }} {{ edito.cohesion.relative }} soudé que la moyenne des autres groupes, qui {{ actif ? 'est' : 'était' }} de {{ moyennes.cohesion|number_format(2, ',', ' ') }}.</p>
           {% if histogrammes.cohesion.barres|length > 1 %}
             <div class="card card-stats mt-4">
               <div class="card-body pb-0">
@@ -160,57 +163,10 @@
         </div>
       {% endif %}
 
-      {# --- Coalitions ---
-         Section propre à ce dépôt : le site ne la sert que sur la fiche du
-         groupe, pas sur sa page de statistiques. Conservée telle quelle sur
-         demande, elle est le seul écart de structure assumé de cette page. #}
-      {% if coalitions %}
-        <div class="mt-5" id="coalitions">
-          <h2 class="mb-3">Coalitions les plus fréquentes</h2>
-          <div class="card card-statistiques border-0 mb-3">
-            <div class="card-body">
-              <p>
-                Dans une Assemblée nationale où aucun groupe n'a la majorité absolue, les coalitions
-                sont essentielles pour faire adopter des textes. Avec quels groupes
-                {{ groupe.libelle_abrev }} {{ actif ? 's\'associe-t-il' : 's\'associait-il' }} lors des votes ?
-              </p>
-              {% if coalition_blocs %}
-                <p class="mb-0">
-                  La coalition avec laquelle le groupe {{ groupe.libelle_abrev }}
-                  {{ actif ? 'a le plus fréquemment voté' : 'avait le plus fréquemment voté' }}
-                  ({{ coalitions[0].votes }} scrutins) est composée de groupes
-                  {%- for bloc in coalition_blocs %}
-                    {{- loop.first ? ' ' : (loop.last ? ' et ' : ', ') }}
-                    {{- bloc.preposition }}<b>{{ bloc.nom }}</b> ({{ bloc.sigles|join(', ') }})
-                  {%- endfor -%}.
-                </p>
-              {% endif %}
-            </div>
-          </div>
-
-          <table class="table table-striped table-vote-individual" style="width: 100%">
-            <caption class="sr-only">Coalitions les plus fréquentes du groupe {{ groupe.libelle_abrev }}</caption>
-            <thead>
-              <tr>
-                <th scope="col" class="all">Groupes ayant voté ensemble</th>
-                <th scope="col" class="text-center all">Scrutins</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for coalition in coalitions %}
-                <tr>
-                  <td>
-                    {% for sigle in coalition.sigles %}
-                      <span class="badge mr-1" style="background-color: {{ coalitions_couleurs[sigle]|default('#6c757d') }}; color: #fff">{{ sigle }}</span>
-                    {% endfor %}
-                  </td>
-                  <td class="text-center"><b>{{ coalition.votes }}</b></td>
-                </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
-      {% endif %}
+      {# La section « Coalitions les plus fréquentes » qui vivait ici a été
+         retirée : le site ne la sert que sur la fiche du groupe, jamais sur sa
+         page de statistiques, et c'était le dernier écart de structure de la
+         page. La fiche, elle, la garde (`groupe/individual.html.twig`). #}
 
       {# --- Proximité avec chaque groupe --- #}
       <div class="mt-5">

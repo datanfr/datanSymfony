@@ -10,9 +10,11 @@
       <p>Quel groupe politique a le plus fort taux de participation à l'Assemblée nationale ?</p>
       <p>Pour chaque groupe, <b>nous avons calculé le taux de participation moyen de leurs députés</b>. Autrement dit, si le groupe parlementaire affiche un taux de 80 %, cela signifie que, en moyenne, les députés membres du groupes participent en moyenne à 80 % des votes de l'Assemblée nationale.</p>
       <p>Les parlementaires ont de nombreuses activités, que ce soit à l'Assemblée nationale ou dans leur circonscription. <b>Le vote est une des activités essentielles</b> : ce sont les projets de loi et les amendements adoptés par une majorité des députés qui impacteront la vie des citoyens.</p>
-      <p><span class="font-weight-bold text-primary">Nous proposons donc deux scores de participation :</span></p>
+      <p><span class="font-weight-bold text-primary">Nous proposons donc trois scores de participation :</span></p>
       <p>Le <u>premier</u> ne concerne que les votes solennels. Les votes solennels sont les votes les plus importants et concernent des projets de loi significatifs et fortement discutés dans les médias. Pour ces votes, le jour et l'heure du vote sont connus à l'avance, favorisant ainsi la présence des parlementaires dans l'hémicycle. En moyenne, le taux de participation des groupes politiques pour les scrutins solennels est de {{ (moyenne_solennels * 100)|round }} %. C'est ce score qui est souvent mis en avant sur Datan.</p>
-      <p>Le <u>second</u> prend en compte tous les votes en séance publique. Le taux de participation moyen pour ce score est de {{ (moyenne_tous * 100)|round }} %.</p>
+      {# Phrase reprise du site (groupes-participation.php:8), « 100% » sans espace compris. #}
+      <p>Le <u>deuxième</u> ne prend en compte que les votes en lien avec le domaine de spécialisation d'un député. Par exemple, un député avec un score de 100% aura participé, en séance publique, à tous les scrutins sur des textes qui ont été précédemment examinés dans sa commission parlementaire. Ce sont sur ces votes que les élus ont un intérêt et une expertise particulière, et sont donc plus susceptibles de participer aux travaux parlementaires. Le taux de participation moyen pour ce score est de {{ (moyenne_commission * 100)|round }} %.</p>
+      <p>Le <u>troisième</u> prend en compte tous les votes en séance publique. Le taux de participation moyen pour ce score est de {{ (moyenne_tous * 100)|round }} %.</p>
       {% if not assez_de_solennels %}
         <div class="alert alert-danger my-4">
           Sur Datan, nous mettons en avant le score de participation aux scrutins solennels. Toutefois, la législature venant de commencer et avec seulement {{ nombre_solennels }} votes solennels, cette statistique n'est pas affichée sur cette page. Elle le sera après un minimum de {{ seuil_solennels }} scrutins.
@@ -50,6 +52,9 @@
         <div class="nav nav-tabs" id="nav-tab" role="tablist">
           <a class="nav-item nav-link no-decoration {{ assez_de_solennels ? 'active' : '' }}" id="nav-votes-solennels" data-toggle="tab" href="#nav-solennels" role="tab" aria-controls="nav-solennels" aria-selected="{{ assez_de_solennels ? 'true' : 'false' }}">
             <h3>Votes solennels</h3>
+          </a>
+          <a class="nav-item nav-link no-decoration" id="nav-votes-com" data-toggle="tab" href="#nav-commission" role="tab" aria-controls="nav-commission" aria-selected="false">
+            <h3>Votes par spécialisation</h3>
           </a>
           <a class="nav-item nav-link no-decoration {{ assez_de_solennels ? '' : 'active' }}" id="nav-votes-all" data-toggle="tab" href="#nav-all" role="tab" aria-controls="nav-all" aria-selected="{{ assez_de_solennels ? 'false' : 'true' }}">
             <h3>Tous les votes</h3>
@@ -91,6 +96,35 @@
               </tbody>
             </table>
           {% endif %}
+        </div>
+        <div class="tab-pane fade" id="nav-commission" role="tabpanel" aria-labelledby="nav-votes-com">
+          <p class="my-4">
+            <i>Ce tableau comprend tous les votes en séance publique et qui ont un lien avec le domaine de spécialisation (par exemple économie, environnement) du député. Plus précisément, ce score ne prend en compte que les textes précédemment examinés dans la commission du député.</i>
+          </p>
+          <p>
+            <i>Le taux de participation moyen pour ce score est de {{ (moyenne_commission * 100)|round }} %.</i>
+          </p>
+          <table class="table table-stats" style="width: 100%;">
+            <caption class="sr-only">Classement des groupes selon leur taux de participation à tous les votes par spécialisation</caption>
+            <thead>
+              <tr>
+                <th scope="col" class="text-center">N°</th>
+                <th scope="col" class="text-center">Groupe</th>
+                <th scope="col" class="text-center">Taux de participation moyen</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for groupe in commission %}
+                <tr>
+                  <td class="text-center">{{ groupe.rang }}</td>
+                  <td class="text-center">
+                    <a href="{{ path('groupe_individual', {legislature: groupe.legislature, abrev: groupe.libelle_abrev|lower}) }}" class="no-decoration underline">{{ groupe.libelle|name_group }} ({{ groupe.libelle_abrev }})</a>
+                  </td>
+                  <td class="text-center">{{ groupe.pourcentage }} %</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
         </div>
         <div class="tab-pane fade {{ assez_de_solennels ? '' : 'show active' }}" id="nav-all" role="tabpanel" aria-labelledby="nav-votes-all">
           <p class="my-4">

@@ -15,8 +15,10 @@
 
 {% block javascripts %}
   <script src="{{ asset('assets/js/dist/autocomplete_search.js') }}"></script>
+  {# Clics et infobulles de la carte des départements (data-slug des SVG). #}
+  <script src="{{ asset('assets/js/dist/map_france.js') }}"></script>
   {# La bibliothèque Typed avant dist/typed.js, qui l'instancie sur .text-slider. #}
-  <script src="{{ asset('assets/js/dist/typed.umd.js') }}"></script>
+  <script src="{{ asset('assets/js/libraries/typed/typed.umd.js') }}"></script>
   <script src="{{ asset('assets/js/dist/typed.js') }}"></script>
   {# L'hémicycle : donut Chart.js à bulles d'effectif, comme le script en pied
      de home/index.php — datalabels s'enregistre explicitement (v2). #}
@@ -66,6 +68,47 @@
         data: dataHemicycle,
         options: optionsHemicycle
       });
+
+      {% if election_municipales %}
+      var dataElection = {
+        labels: [{% for g in election_municipales.groupes %}{{ g.libelle_abrev|json_encode|raw }},{% endfor %}],
+        datasets: [{
+          label: 'Candidats (%)',
+          data: [{% for g in election_municipales.groupes %}{{ g.pct }},{% endfor %}],
+          backgroundColor: [{% for g in election_municipales.groupes %}{{ (g.couleur ?: '#8D949A')|json_encode|raw }},{% endfor %}],
+          borderWidth: 1
+        }]
+      };
+
+      new Chart(document.getElementById('chart_election'), {
+        type: 'bar',
+        data: dataElection,
+        options: {
+          scales: {
+            y: {
+              beginAtZero: true,
+              ticks: {
+                callback: function (value) {
+                  return value + '%';
+                }
+              }
+            }
+          },
+          plugins: {
+            legend: { display: false },
+            datalabels: {
+              anchor: 'end',
+              align: 'top',
+              formatter: function (value) {
+                return value + '%';
+              },
+              color: '#000',
+              font: { weight: 'bold', size: 12 }
+            }
+          }
+        }
+      });
+      {% endif %}
     });
   </script>
 {% endblock %}
@@ -240,9 +283,46 @@
     </div>
   </div>
 
-  {# Le bandeau « Élections municipales 2026 » de datan.fr n'est pas porté : le
-     legacy le tient sous une élection (id = 7) absente de son propre catalogue,
-     chantier en cours non repris (cf. CLAUDE.md, TODO §3). #}
+  <!-- ÉLECTIONS MUNICIPALES 2026 (bloc-election du legacy) -->
+  {% if election_municipales %}
+    <div class="row bloc-election" id="pattern_background">
+      <div class="container p-md-0">
+        <div class="row py-4">
+          <div class="col-12">
+            <h2 class="text-center my-4">Élections municipales 2026</h2>
+            <h3 class="mt-3">Découvrez les députés candidats aux municipales</h3>
+          </div>
+        </div>
+        <div class="row pt-2 pb-5">
+          <div class="col-md-5 d-flex flex-column justify-content-center">
+            {# Le futur est celui du legacy, conservé tel quel bien que le
+               scrutin soit passé : la phrase est la sienne, mot pour mot. #}
+            <p>Les élections municipales se dérouleront les dimanches <b>15 et 22 mars 2026</b>.</p>
+            <p>Notre équipe a répertorié {{ election_municipales.candidats }} député{{ election_municipales.candidats > 1 ? 's' }} candidat{{ election_municipales.candidats > 1 ? 's' }} aux élections municipales de 2026, dont {{ election_municipales.tetes }} sont têtes de liste.</p>
+            {% set premier = election_municipales.groupes|first %}
+            <p>Le groupe politique <a href="{{ path('groupe_individual', {legislature: premier.legislature, abrev: premier.libelle_abrev|lower}) }}">{{ premier.libelle_abrev }}</a> compte la plus forte proportion de députés candidats aux municipales 2026 : <b>{{ premier.candidats }} de ses {{ premier.effectif }} membres se présentent</b>, soit {{ premier.pct }}%.</p>
+          </div>
+          <div class="col-md-7 mt-5 mt-md-0">
+            <div class="card card-election-groups">
+              <div class="card-header font-weight-bold text-center">
+                Pourcentage de députés candidats aux municipales 2026 par groupe politique
+              </div>
+              <div class="card-body">
+                <canvas id="chart_election"></canvas>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="row pb-5">
+          <div class="col-12 d-flex justify-content-center">
+            <a href="{{ path('elections_individual', {slug: 'municipales-2026'}) }}" class="no-decoration">
+              <button type="button" class="btn btn-primary">Découvrez les députés candidats</button>
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
+  {% endif %}
 
   <!-- BLOG (bloc-posts du legacy) -->
   {% if posts %}

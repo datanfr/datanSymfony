@@ -11,6 +11,7 @@ use App\FamilleGroupe;
 use App\FamilleSocioPro;
 use App\Groupe\EditoGroupe;
 use App\Groupe\MoyennesAssemblee;
+use App\Groupe\ReseauxGroupe;
 use App\Groupe\SoutienGouvernement;
 use App\Groupe\StatistiquesGroupe;
 use App\Legislature;
@@ -180,6 +181,13 @@ class GroupeController extends AbstractController
                 'opposition' => EditoGroupe::opposition($groupe['position_politique']),
             ],
             'echiquier' => ComportementDepute::ECHIQUIER[$sigle] ?? null,
+            'liens' => ReseauxGroupe::liens($sigle),
+            // Encart « Municipales 2026 » en tête de biographie : le nombre de
+            // candidats du groupe, sur la seule législature courante — comme le
+            // site (`Groupes::individual`, `legislature == legislature_current()`).
+            'election_municipales' => $legislature === Legislature::COURANTE
+                ? $this->candidatsMunicipales($groupeId)
+                : null,
             'moyennes' => $moyennes,
             'rang' => $this->moyennes->rangParEffectif($groupeId, $legislature),
             'sieges' => MoyennesAssemblee::SIEGES,
@@ -363,8 +371,6 @@ class GroupeController extends AbstractController
             }
         }
 
-        $coalitions = $this->coalitions($groupeId, $legislature);
-
         $comportement = $this->comportement($groupeId);
         $composition = $this->composition($groupe);
         $chiffres = $this->chiffres(array_merge(...array_values($composition)));
@@ -432,15 +438,7 @@ class GroupeController extends AbstractController
             'famille' => $famille,
             'groupes_lies' => $this->historique($groupe['uid'], $groupeId),
             'proximites' => $proximites,
-            'coalitions' => $coalitions,
-            'coalitions_couleurs' => $this->couleursParSigle($legislature),
             'proximite_mensuelle' => $this->proximiteParMois($groupeId),
-            // La lecture en blocs politiques n'est établie que pour la 17e
-            // législature : ailleurs, on montre les coalitions sans les
-            // commenter plutôt que d'inventer un partage.
-            'coalition_blocs' => $legislature === BlocPolitique::LEGISLATURE && $coalitions !== []
-                ? BlocPolitique::repartis($coalitions[0]['sigles'])
-                : [],
             'majorite' => $majorite,
             'plus_proche' => $retenus[0] ?? null,
             'plus_eloigne' => $retenus !== [] ? end($retenus) : null,
@@ -1179,5 +1177,45 @@ class GroupeController extends AbstractController
         }
 
         return ['presidents' => $presidents, 'membres' => $membres, 'apparentes' => $apparentes];
+    }
+
+    /**
+     * Nombre de députés du groupe candidats aux municipales de 2026, pour
+     * l'encart en tête de fiche (`Elections_model::get_n_candidates_by_group`).
+     *
+     * Le critère est celui, éprouvé, du bloc de l'accueil
+     * ({@see HomeController::electionMunicipales}) : candidature visible ET
+     * positive ET député encore en exercice. Le site, lui, compte sur le
+     * `groupeId` de sa table `deputes_last` sans filtre d'activité, si bien
+     * qu'un candidat qui a quitté l'Assemblée y reste compté « député membre
+     * du groupe » — LFI-NFP 51 chez lui contre 50 ici, la ligne d'écart étant
+     * un ex-député. Divergence assumée : la phrase de l'encart dit « députés
+     * membres du groupe », on compte des députés membres du groupe.
+     *
+     * Nul (encart absent) tant que l'élection n'a aucune candidature en base :
+     * la donnée vient d'`app:import:elections`, hors synchronisation — sans
+     * import joué, annoncer « aucun candidat » serait faux.
+     */
+    private function candidatsMunicipales(int $groupeId): ?int
+    {
+        $compte = $this->connection->fetchAssociative(
+            "SELECT COUNT(*) AS total,
+                    COALESCE(SUM(d.groupe_id = :groupe
+                        AND EXISTS (SELECT 1 FROM mandat m
+                                    WHERE m.depute_id = d.id
+                                      AND m.legislature = :legislature
+                                      AND m.date_fin IS NULL)), 0) AS candidats
+             FROM candidature c
+             JOIN election e ON e.id = c.election_id
+             JOIN depute d ON d.id = c.depute_id
+             WHERE e.slug = 'municipales-2026' AND c.visible = 1 AND c.candidat = 1",
+            ['groupe' => $groupeId, 'legislature' => Legislature::COURANTE],
+        );
+
+        if ($compte === false || (int) $compte['total'] === 0) {
+            return null;
+        }
+
+        return (int) $compte['candidats'];
     }
 }

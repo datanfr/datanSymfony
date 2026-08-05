@@ -23,7 +23,10 @@
         </div>
       </div>
       <div class="bloc-infos mt-2">
-        <{{ tag }} class="title d-block text-lg-left">{{ groupe.libelle|name_group }}</{{ tag }}>
+        {# Le site titre la carte par son `$title`, où les non-inscrits deviennent
+           « Députés non inscrits » (`CASE WHEN o.libelle = "Non inscrit"` de
+           Groupes_model) ; l'`alt` de l'image, lui, garde le libellé brut. #}
+        <{{ tag }} class="title d-block text-lg-left">{{ non_inscrits ? 'Députés non inscrits' : groupe.libelle|name_group }}</{{ tag }}>
       </div>
       <div class="bloc-bref mt-3 d-flex justify-content-center justify-content-lg-start">
         <ul>

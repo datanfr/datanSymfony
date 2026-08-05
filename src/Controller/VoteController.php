@@ -2,6 +2,7 @@
 
 namespace App\Controller;
 
+use App\CouleurGroupe;
 use App\Legislature;
 use App\Referencement\OpenGraph;
 use App\TypeVoteEdito;
@@ -104,7 +105,8 @@ class VoteController extends AbstractController
                     dos.legislature AS dossier_legislature,
                     dos.procedure_parlementaire AS dossier_procedure,
                     a.href AS amendement_href, a.expose AS amendement_expose,
-                    a.resume_ia AS amendement_resume, a.resume_relu AS amendement_resume_relu
+                    a.resume_ia AS amendement_resume, a.resume_relu AS amendement_resume_relu,
+                    a.auteur_type AS amendement_auteur_type, a.auteur_ref AS amendement_auteur_ref
              FROM scrutin s
              LEFT JOIN decryptage d ON d.scrutin_id = s.id AND d.state = :published
              LEFT JOIN categorie c ON c.id = d.categorie_id
@@ -162,6 +164,12 @@ class VoteController extends AbstractController
             'date_scrutin_fr' => $this->frenchDate($scrutin['date_scrutin'] ?? null),
             'explications' => $explications,
             'explication_en_avant' => $mpEnAvant,
+            // Carte « L'auteur de l'amendement » (Votes::index, lignes 369-382
+            // du legacy) : le député — ou le Gouvernement — auteur de
+            // l'amendement mis aux voix. Les deux autres variantes du bloc du
+            // site (rapporteurs et auteurs d'une proposition de loi) demandent
+            // les initiateurs de dossier, non importés — cf. TODO §1.
+            'auteur_amendement' => $this->auteurAmendement($scrutin),
             'ogp' => $this->ogp($scrutin, $numeroAffiche, $mpEnAvant, $explications),
             'fil_ariane' => [
                 ['nom' => 'Datan', 'url' => $this->generateUrl('home')],
@@ -185,6 +193,65 @@ class VoteController extends AbstractController
         $response->setEtag(md5($response->getContent() ?: ''));
 
         return $response;
+    }
+
+    /**
+     * L'auteur de l'amendement mis aux voix, pour la carte sous le vote.
+     *
+     * Trois types d'auteur dans la source (`amendement.auteur_type`, cf.
+     * `app:import:auteurs-amendements`) : « Député » et « Rapporteur » donnent
+     * la carte du député — son groupe est le rattachement courant, comme sur
+     * toute carte —, « Gouvernement » une carte nue au nom de l'organe.
+     *
+     * Le nom du Gouvernement reprend la composition du site,
+     * `ucfirst(mb_strtolower(libelleAbrege))` : « LECORNU II » s'affiche
+     * « Lecornu ii », numéro romain abaissé compris — c'est ce que publie
+     * datan.fr, on ne « répare » pas.
+     *
+     * @param array<string, mixed> $scrutin
+     *
+     * @return array<string, mixed>|null
+     */
+    private function auteurAmendement(array $scrutin): ?array
+    {
+        $ref = $scrutin['amendement_auteur_ref'] ?? null;
+        if ($ref === null) {
+            return null;
+        }
+
+        if (\in_array($scrutin['amendement_auteur_type'], ['Député', 'Rapporteur'], true)) {
+            $depute = $this->connection->fetchAssociative(
+                'SELECT d.mp_id, d.firstname, d.lastname, d.slug, d.dpt_slug, d.civilite,
+                        d.departement_nom, d.departement_code,
+                        g.libelle AS groupe_libelle, g.libelle_abrev AS groupe_abrev,
+                        ' . CouleurGroupe::SQL . ' AS groupe_couleur,
+                        (SELECT MAX(m.legislature) FROM mandat m WHERE m.depute_id = d.id) AS legislature_last
+                 FROM depute d
+                 LEFT JOIN groupe g ON g.id = d.groupe_id
+                 WHERE d.mp_id = :ref
+                 LIMIT 1',
+                ['ref' => $ref],
+            );
+
+            return $depute === false ? null : ['type' => 'depute', 'depute' => $depute];
+        }
+
+        $organe = $this->connection->fetchAssociative(
+            'SELECT libelle_abrege, date_debut FROM organe WHERE uid = :ref LIMIT 1',
+            ['ref' => $ref],
+        );
+
+        if ($organe === false || $organe['libelle_abrege'] === null) {
+            return null;
+        }
+
+        $nom = mb_strtolower((string) $organe['libelle_abrege']);
+
+        return [
+            'type' => 'gouvernement',
+            'nom' => mb_strtoupper(mb_substr($nom, 0, 1)) . mb_substr($nom, 1),
+            'date_debut' => $organe['date_debut'],
+        ];
     }
 
     /**
@@ -347,7 +414,10 @@ class VoteController extends AbstractController
 
             $row['positionMajoritaire'] = $row['positionMajoritaire'] ?: 'nv';
             $row['percentageVotants'] = (int) round($exprimes / $effectif * 100);
-            $row['cohesion'] = $exprimes > 0 ? round(($max - 0.5 * ($exprimes - $max)) / $exprimes, 3) : 0;
+            // Sans vote exprimé, pas de cohésion : cellule vide, comme le site —
+            // un « 0.000 » affirmerait un groupe parfaitement désuni là où
+            // personne n'a voté.
+            $row['cohesion'] = $exprimes > 0 ? round(($max - 0.5 * ($exprimes - $max)) / $exprimes, 3) : null;
         }
 
         return $rows;

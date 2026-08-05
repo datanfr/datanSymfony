@@ -13,18 +13,6 @@ redirigée en 301, ou écartée pour une raison consignée au §3.
 
 ## 1. Chantiers restants
 
-- [ ] **Le troisième score de participation, « Votes par spécialisation ».**
-      Participation aux scrutins portant sur des textes examinés dans la
-      commission du député (`class_participation_commission` du legacy). La
-      voie est mesurée : la donnée existe dans les dépôts Tricoteuses — l'acte
-      `AN1-COM-FOND` porte l'`organeRef` de la commission au fond, 1 662
-      dossiers de la 17e, soit 7 275 scrutins sur 8 434 (86 %), couverture
-      comparable à celle du legacy. Livrer demande une migration
-      (`dossier.commission_fond`), une reprise d'`ImportDossiersCommand` et un
-      rejeu de cet import ; le type de classement, le calcul et l'onglet des
-      deux pages de participation sont ensuite mécaniques. Le texte continue
-      d'annoncer « deux scores » tant que le troisième n'existe pas —
-      l'annoncer sans l'onglet serait pire.
 - [ ] **Professions de foi : la table est vide, les PDF manquent.** Le bloc
       « Ses professions de foi » de la fiche est porté
       (`depute/_professions_foi.html.twig`) et son import écrit
@@ -32,51 +20,56 @@ redirigée en 301, ou écartée pour une raison consignée au §3.
       backup public** et les PDF (`assets/data/professions/election_*/`) ne sont
       pas dans nos assets. À rejouer contre la vraie base au déploiement (§2),
       avec la copie du répertoire d'assets. D'ici là le bloc reste masqué.
-- [ ] **Municipales 2026 sur les fiches et l'accueil.** datan.fr affiche un
-      encart « Municipales 2026 » en tête de fiche de **député** comme de
-      **groupe** (où il compte les candidats du groupe), et une section sur
-      l'accueil (311 députés candidats). Le legacy les tient sous une élection
-      `id = 7` absente de son propre catalogue : c'est son chantier en cours, à
-      porter avec le domaine électoral, pas avant (cf. §3).
 - [ ] **HATVP : dernier métier déclaré.** Le legacy ajoute au bloc métier un
       paragraphe et une modale sur les activités déclarées à la HATVP. La table
       `hatvp` du backup public est **vide (0 ligne)** : même traitement que les
       professions de foi.
-- [ ] **Bloc « L'auteur de l'amendement » sur la page de vote.** datan.fr affiche
-      une carte d'auteur (député, ou « Gouvernement Lecornu ii ») sous le vote
-      d'un amendement. `amendement.signataires` est vide dans notre import et
-      l'open data ne publie pas l'auteur d'amendement : le legacy le **scrape**
-      sur `assemblee-nationale.fr/dyn/` (cf. CLAUDE.md). Même chantier que le
-      lien scrutin → amendement.
-- [ ] **« a voté en faveur de du projet de loi immigration »** : la préposition
-      doublée vient du texte de `VOTES_CLES`, composé comme au legacy —
-      datan.fr l'affiche aussi. Notre règle d'arbitrage (un défaut se corrige)
-      dit de composer la phrase sans le doublon, avec le commentaire d'usage ;
-      reproduite pour l'instant.
-- [ ] **Statistiques d'une législature passée (`/legislature-N`).** datan.fr
-      affiche participation, loyauté et proximités pour la législature consultée ;
-      nous nous taisons, `vote` ne couvrant que la 17e (plus les deux scrutins-clés
-      de la 16e importés par `app:import:votes-cles`). Lever cet écart demande
-      d'importer les votes nominatifs des législatures 14 à 16 (dépôts
-      `Scrutins_XIV/XV/XVI_nettoye`, ~3 M de lignes) — décision de volumétrie à
-      prendre, pas un défaut de portage.
-- [ ] **Le bloc « En savoir plus » d'un groupe est prêt à poser.** Rien à
-      importer : côté legacy c'est un **switch codé en dur sur le sigle**
-      (`Groupes_model::get_groupe_social_media()`, lignes 321-427 — site, X,
-      Facebook, Wikipédia pour une vingtaine de groupes). Le porter, c'est
-      transcrire ce switch dans une classe à côté d'`EditoGroupe`, qui fait
-      déjà exactement cela pour les textes de création, et rendre le bloc en
-      pied de **fiche** (pas sur la page statistiques) avec `url_obf`.
-- [ ] **Trois retouches sur les pages de groupe.** La section « Coalitions » de
-      la page statistiques est chez nous et pas sur le site, qui ne la sert que
-      sur la fiche — seul écart de structure restant, hérité d'une consigne de
-      la passe du 30 juillet (« n'y retouche pas ») : à retirer, ou à assumer
-      en le commentant. La carte de profil du groupe NI écrit « Non
-      inscrit » où le site écrit « Députés non inscrits » (son `CASE WHEN`) —
-      une ligne dans `carte_profil.html.twig`. Et la page statistiques écrit
-      la cohésion « 0.95 » avec un point quand les pages de classement ont
-      adopté la virgule française : nos propres pages ne suivent pas la même
-      règle, l'une des deux doit céder.
+- [ ] **Le bloc auteur de la page de vote n'a que sa variante amendement.** La
+      carte « L'auteur de l'amendement » (député ou Gouvernement) est portée le
+      4 août — la donnée ne demandait **aucun scraping**, contrairement à ce que
+      ce fichier affirmait : `amendementsAuteurs()` (daily.php:3753) lit les
+      archives XML de l'open data, et le dépôt Tricoteuses des amendements porte
+      la même structure `signataires.auteur` en JSON
+      (`app:import:auteurs-amendements`, hors sync, à rejouer après un import
+      d'amendements). Restent les deux variantes du même bloc que sert datan.fr
+      sur les votes **sans** amendement : « Le rapporteur » et « L'auteur de la
+      proposition de loi » (`Votes::index`, `get_dossier_mp_authors` /
+      `get_dossier_mp_rapporteurs`) — elles demandent les initiateurs et
+      rapporteurs de dossier (`dossiers_auteurs`, `documents_legislatifs`), que
+      nous n'importons pas encore ; l'acte `AN1-COM-FOND` des dossiers
+      Tricoteuses ouvre peut-être la voie, comme pour `commission_fond`.
+- [ ] **La participation d'un groupe sur une page de vote diverge d'un point.**
+      Sur le scrutin 8409 de la 17e, EPR sort à 13 % chez nous contre 12 % sur
+      le site, LFI-NFP à 23 % contre 21 % — mêmes numérateurs (12 et 16), donc
+      un dénominateur différent : nous divisons par
+      `vote_groupe.nombre_membres_groupe` (91 et 71, la ventilation publiée par
+      l'Assemblée), le site par un effectif plus large (~97 et ~75, sans doute
+      sa table `groupes_effectif`). Écart de calcul, pas d'affichage — à
+      trancher avec les autres reprises de `vote_groupe`.
+- [ ] **Statistiques d'une législature passée (`/legislature-N`) : reste la
+      carte de la majorité.** Les votes nominatifs des
+      législatures 14 à 16 sont importés le 4 août (dépôts
+      `Scrutins_XIV/XV/XVI_nettoye`, 111 244 + 475 212 + 604 815 lignes, zéro
+      écartée — `vote` couvre désormais 2,46 M de lignes sur les quatre
+      législatures), et les calculs dérivés sont rejoués **par législature**
+      (`app:calcul:statistiques-deputes --legislature=N`, qui ne réécrit que la
+      sienne ; `statistique_depute` porte désormais le `groupe_id` de l'époque).
+      `ComportementDepute` sait servir une législature close : moyennes sans
+      filtre d'activité, barres de proximité sur tous les groupes et sans phrase
+      éditoriale — les règles du `Depute_service` du legacy. Vérifié contre le
+      site vivant sur Bernalicis : 15e (95 %, moyennes 91/96, loyauté 100,
+      moyennes 94/99) et 16e (95 %, moyenne 83 ; loyauté 100, moyennes 96/99 ;
+      proximités LFI-NUPES 100/894, ECOLO 88, HOR 19, RE 19, DEM 20) — tout au
+      point près, sauf SOC-A 78 contre 79 (un vote sur 140, famille des chiffres
+      d'époque figés du §4, ne pas courir après). Les pages de vote 14-16
+      servent déjà leur détail nominatif (vote 1200 de la 15e : 24 contre /
+      6 pour, identique au site). Le branchement d'affichage est fait le
+      4 août : `DeputeController::legislature()` passe `statistiques` (groupe
+      de l'époque) et `depute/legislature.html.twig` rend le bloc — vérifié sur
+      Bernalicis 15e et 16e, mêmes chiffres que la validation ci-dessus. Reste,
+      pour la parité complète de cette fiche, la carte « Proximité avec la
+      majorité gouvernementale » des 14e-16e, qui demande un équivalent de
+      `class_majorite` (la 17e n'a pas de majorité déclarée, cf. CLAUDE.md).
 - [ ] **Les photos détourées de datan.fr ne sont pas dans ce dépôt.** Le site
       sert un portrait détouré, recadré carré en 240 × 240 depuis la 17e
       (`assets/imgs/deputes_original/`) ou en 150 × 192 avant
@@ -90,13 +83,15 @@ redirigée en 301, ou écartée pour une raison consignée au §3.
       pèsent une centaine de mégaoctets, ne se régénèrent pas (détourage fait à
       la main) et ne vivent que sur le serveur : **à recopier au déploiement**,
       comme les PDF des professions de foi.
-- [ ] **70 scrutins de la 17e restent sans rattachement complet** (22 sans
-      amendement, 48 sans dossier) après `app:lien:scrutins`. Le recours,
-      `app:scraper:scrutins --relance`, a été rejoué le 30 juillet : 70 pages
-      visitées, **zéro gain** — 19 pages sans aucun lien d'amendement, 3
-      numéros discordants, et les pages des sans-dossier n'offrent rien non
-      plus. L'écart est chez la source : l'Assemblée n'a pas complété ses
-      pages. À relancer de loin en loin, rien à corriger chez nous.
+- [ ] **68 scrutins de la 17e restent sans rattachement complet** (20 sans
+      amendement, 48 sans dossier) après `app:lien:scrutins` — deux amendements
+      gagnés le 4 août par arbitrage manuel (`RATTACHEMENTS_ARBITRES` de
+      `LienScrutinsCommand`, avec 7 dossiers corrigés et le vote du Congrès).
+      Le recours, `app:scraper:scrutins --relance`, rejoué le 30 juillet puis
+      le 4 août : 68 pages visitées, **zéro gain** — 17 pages sans aucun lien
+      d'amendement, 3 numéros discordants, et les pages des sans-dossier
+      n'offrent rien non plus. L'écart est chez la source : l'Assemblée n'a pas
+      complété ses pages. À relancer de loin en loin, rien à corriger chez nous.
 - [ ] **`simplicite_ia`** : la colonne « Simplicité » de l'écran des amendements
       s'affiche « — » tant que la génération IA ne la produit pas (le legacy la
       rend en étoiles 1-5). À brancher dans `app:ia:resumes-amendements` le jour
@@ -149,12 +144,11 @@ Rien à coder d'avance ; à dérouler le jour J, dans cet ordre de préférence.
   donnée de production a dérivé (« Hubert De jenlis »). Une donnée fausse ne
   vaut pas mieux qu'une absente.
 - **Les tables `elect_bv_*`** (grain bureau de vote, jamais écrites) et les
-  **municipales 2026** (élection `id = 7` absente du catalogue legacy) : le
-  chantier en cours du legacy, pas une donnée à porter. Conséquence directe : le
-  bandeau **`electionFeature` (« Municipales 2026 »)** ne peut s'afficher ni en
-  tête de fiche de député, ni en tête de fiche de **groupe** (où il compte les
-  candidats du groupe), ni sur l'accueil. C'est le seul écart visible restant
-  sur la fiche d'un député candidat.
+  **résultats municipaux du ministère** (`elect_municipales_*`) : le chantier en
+  cours du legacy, pas une donnée à porter. (Les **candidatures** municipales
+  des députés, elles, sont importées depuis que la production a ajouté
+  l'élection `id = 7` à son catalogue — cf. §1 pour les encarts de fiche qui
+  restent à porter.)
 - **La modale de première visite** : éditorial daté, codé en dur, éteinte à la
   source. (Le **`voteFeature`** — l'encart « dernier vote important » — est en
   revanche bien porté : datan.fr l'affiche, il n'était pas éteint. Cf. §4.)
@@ -182,6 +176,63 @@ Rien à coder d'avance ; à dérouler le jour J, dans cet ordre de préférence.
 
 ## 4. Points de vigilance sur l'existant
 
+- **La fiche d'un ancien député se reconstitue par `fonction_groupe`, jamais par
+  `depute.groupe_id`.** La colonne ne porte que l'appartenance courante : les
+  1 545 fiches d'anciens sortaient sans liseré, sans groupe sur leur carte de
+  profil, sans la phrase « a siégé avec le groupe … » et sans moyennes de
+  groupe, là où le site garde le dernier groupe connu dans
+  `deputes_last.groupeId`. `DeputeController::dernierGroupe` le résout (dernier
+  rattachement principal), et deux paragraphes manquaient au gabarit : la sortie
+  de l'Assemblée avec son motif et le rattachement financier au passé. Deux
+  branches de `Depute_edito::get_end_mandate()` **oublient leur `return`**
+  (démission, annulation de l'élection) : le site publie « … le 09 avril 2026 . »
+  sans motif sur 113 fiches ; le motif est rétabli ici, oubli d'écriture et non
+  choix éditorial.
+- **Un exposé d'amendement peut ouvrir par `<p style="…">`, et la garde le
+  ratait.** Le gabarit de la page de vote choisissait entre `|raw` et texte
+  échappé sur la présence de la chaîne `'<p>'` — chevron fermant compris :
+  2 359 des 7 200 exposés mis aux voix ouvrent par `<p style="text-align:…">`
+  et sortaient donc en HTML visible, balises et entités en toutes lettres.
+  Le test porte désormais sur `'<p'`. À se rappeler pour toute garde qui
+  reconnaît du HTML à une balise nue.
+- **Une cellule de cohésion vide n'est pas un zéro.** Un groupe dont personne
+  n'a voté (« Non votant ») affiche une cellule vide sur datan.fr ; nous
+  écrivions `0.000`, ce qui affirme un groupe parfaitement désuni là où il n'y
+  a rien à mesurer. `VoteController::groupBreakdown` rend `null` sur zéro
+  exprimé depuis le 4 août.
+- **`VOTES_CLES` est une sélection éditoriale vivante — la resynchroniser sur le
+  legacy, pas la deviner.** Le 4 août 2026, `Votes_model::get_key_votes_mp()` et
+  le site vivant servaient quatre scrutins, tous 17e (3260, 3300, 8280, 8427),
+  rendus par numéro croissant ; les deux scrutins 16e d'une sélection antérieure
+  (IVG 629, immigration 3213) ont été retirés par la rédaction —
+  `app:import:votes-cles` et ses votes restent en base, sans consommateur
+  jusqu'aux fiches des législatures passées. La préposition doublée « en faveur
+  de du projet de loi » est morte avec le texte qui la portait, mais la garde de
+  composition reste dans `_positions.html.twig` : un texte en « du … » se
+  contracte en « en faveur du … », datan.fr publiait le doublon.
+- **Le pied de la fiche de groupe de datan.fr parle de la législature
+  précédente — pas nous.** Sur `/groupes/legislature-17/lfi-nfp`, le site titre
+  « Les groupes parlementaires de la 16ème législature » au-dessus de liens qui
+  pointent tous vers la 17e, et son bloc d'apparentés renvoie vers
+  `legislature-16/lfi-nupes/membres` : sa variable `$groupe` a été écrasée par
+  l'incarnation précédente du groupe avant `mps_footer.php`. Notre transcription
+  du même gabarit est fidèle et rend, elle, la législature de la fiche. Écart
+  visible sur capture, à ne pas « corriger » vers le site.
+- **L'encart « Municipales 2026 » d'un groupe compte des députés EN EXERCICE.**
+  Règle de l'accueil (visible + candidat + mandat 17e ouvert) : LFI-NFP 50 chez
+  nous contre 51 sur le site, dont le comptage (`get_n_candidates_by_group`,
+  `deputes_last.groupeId` sans filtre d'activité) garde un ex-député — David
+  Guiraud, parti de l'Assemblée. Sa propre page d'accueil compte 311 comme
+  nous. Divergence assumée : la phrase dit « députés membres du groupe ».
+- **« de la commune X » de l'encart municipales : l'article est recomposé, avec
+  deux corrections.** La colonne `nom_de` des `cities` du legacy n'est pas dans
+  notre référentiel : `DeputeController::communeAvecDe/AvecA` la refont (« du
+  Havre », « aux Abymes », « d'Aix-en-Provence »). Corrigés au passage, avec le
+  commentaire d'usage : « à La Rochelle » et « à L'Aigle », où le site perd
+  l'article (« à Rochelle », « à Aigle » — famille « à la La Réunion »). Une
+  divergence de donnée demeure : le site écrit « d'Évry-Courcouronnes » (sa
+  colonne `nom_de` suit un millésime INSEE plus récent) là où notre référentiel
+  — et sa propre fiche de ville — disent « Evry ».
 - **La position majoritaire d'un groupe se RECALCULE, elle ne se reprend pas.**
   Le champ `positionMajoritaire` publié par l'Assemblée ne départage que le
   « pour » et le « contre » : un groupe à 4 pour / 1 contre / 17 abstentions y
@@ -253,7 +304,12 @@ Rien à coder d'avance ; à dérouler le jour J, dans cet ordre de préférence.
   et GDR comptent tous deux 9 cadres sur 17 sièges : sans second critère, la
   carte en vis-à-vis désignait tantôt l'un, tantôt l'autre. Départage par sigle
   — ce qui aligne au passage sur l'affichage du site. À vérifier partout où une
-  carte prend le premier d'un tri.
+  carte prend le premier d'un tri. **Même famille sur les barres « vote
+  rarement avec »** : elles se prenaient en retournant la fin du tri
+  décroissant, ce qui laisse l'ordre des ex æquo au hasard du tri. Bernalicis
+  en 16e (HOR 19, RE 19, DEM 20, LR 20) sortait RE, HOR, LR contre HOR, RE, DEM
+  sur le site. `ComportementDepute::accordGroupes` refait donc un tri croissant
+  avec le même départage par sigle.
 - **La moyenne de cohésion du site ne correspond pas à ses propres lignes.**
   `get_stats_avg()` moyenne `class_groups` sans reprendre le `active = 1` du
   tableau affiché : 0,927 annoncé au-dessus de douze lignes qui donnent 0,925.
@@ -282,6 +338,20 @@ Rien à coder d'avance ; à dérouler le jour J, dans cet ordre de préférence.
   en `nonVotant` (72 lignes pour 72 solennels, aucun trou), le cas général
   couvre le cas particulier et survivra au prochain président — consigné dans
   le docblock de `CalculClassementsCommand`.
+- **« Votes par spécialisation » : trois écarts assumés face au site, aucun à
+  « réparer ».** Le troisième score de participation (livré le 4 août :
+  `dossier.commission_fond` depuis l'acte AN1-COM-FOND, types
+  `deputes/groupes_participation_commission`, onglet sur les deux pages) sort
+  les mêmes têtes de classement et les mêmes scores à ±1 point que datan.fr,
+  mais : nos « nombre de votes » dépassent les siens de ~3 % — sa table
+  `votes_participation_commission` est incrémentale et jamais revisitée, un
+  scrutin rattaché à son dossier après coup lui échappe pour toujours, quand
+  notre recalcul le voit (8 243 scrutins couverts contre ~7 275) ; son tableau
+  des députés liste 584 lignes pour 577 sièges — neuf réélus y figurent en
+  double, sa jointure ne filtrant pas la législature (défaut corrigé) ; et la
+  présidente de l'Assemblée apparaît chez nous, pas chez lui (exception
+  `PA721908` non reprise, comme pour les solennels). Détail dans le docblock de
+  `CalculClassementsCommand::participationCommission`.
 - **L'égalité de rang d'un groupe se juge sur le score stocké, un
   `decimal(6,3)`.** Le `RANK()` d'origine porte sur `class_groups.value` : deux
   groupes séparés à la quatrième décimale sont ex æquo pour le site (UDDPLR et
@@ -326,11 +396,17 @@ Rien à coder d'avance ; à dérouler le jour J, dans cet ordre de préférence.
   `/votes/legislature-17` rendait ainsi ses 8 434 lignes d'un bloc, et les
   **neuf pages de classement** perdaient recherche et tri d'un seul coup.
   **Trois** gabarits avaient l'ordre inversé — `vote/all`, `parrainages/index`
-  et `classement/_layout` —, corrigés le 29 juillet ; `groupe/votes_tous`,
-  `depute/votes` et `vote/individual` étaient justes. Le symptôme ne ressemble
-  pas à une erreur de script : la page s'affiche, simplement sans ses commandes.
-  Le défaut ayant été trouvé trois fois indépendamment le même jour, le
-  vérifier reste le premier réflexe devant un tableau sans barre de recherche.
+  et `classement/_layout` —, corrigés le 29 juillet ; `groupe/votes_tous` et
+  `depute/votes` étaient justes. **`vote/individual` n'avait, lui, ni l'un ni
+  l'autre** : ses deux tables de scrutin (groupes, députés) sortaient sans tri
+  ni recherche sur **toutes** les pages de vote, l'initialisation mourant sur
+  `$.fn.dataTable.moment` introuvable — variante muette du même défaut, trouvée
+  le 4 août en comptant les `dataTables_wrapper` du DOM rendu (`chrome
+  --headless --dump-dom`, 0 attendu 2). Le symptôme ne ressemble pas à une
+  erreur de script : la page s'affiche, simplement sans ses commandes. Le
+  défaut ayant été trouvé quatre fois indépendamment, le vérifier reste le
+  premier réflexe devant un tableau sans barre de recherche — et le compte des
+  `dataTables_wrapper` le tranche sans ouvrir un navigateur.
 - **La composition d'une législature achevée est incomplète dans notre source.**
   La phrase « il y avait à l'Assemblée nationale N hommes et M femmes » compte,
   comme le legacy, les mandats dont la prise de fonction est le **jour
@@ -414,9 +490,12 @@ Rien à coder d'avance ; à dérouler le jour J, dans cet ordre de préférence.
   c'est elle que nous rendons — divergence volontaire avec ce que le site
   *affiche*, parité avec ce qu'il *dit*.
 - **Corrections typographiques assumées, à ne pas « ré-aligner » sur le site.**
-  Virgule décimale (`0,86` contre `0.86`), « Assemblée nationale » en minuscule
-  là où deux titres du legacy capitalisent, accords et coquilles des mentions
-  légales, « à la Réunion » contre « à la La Réunion », élision « d'Ajaccio ».
+  Virgule décimale (`0,86` contre `0.86` — cohésion des pages de groupe
+  comprise depuis le 4 août), « Assemblée nationale » en minuscule là où deux
+  titres du legacy capitalisent, accords et coquilles des mentions légales,
+  « à la Réunion » contre « à la La Réunion », élision « d'Ajaccio », et
+  l'espace avant le point de « … le 23 janvier 2025 . » sur la fiche d'un
+  ancien député.
   Chacune porte son commentaire dans le gabarit : sans lui, le prochain lecteur
   y voit une erreur de portage et « répare » dans le mauvais sens.
 - **Deux phrases à trou du legacy ne sont pas reproduites.**
@@ -477,11 +556,11 @@ Rien à coder d'avance ; à dérouler le jour J, dans cet ordre de préférence.
     représentativité, et le classement de loyauté qui compte 577 lignes contre
     ses 576 (elle est la ligne en plus). Une moisson Tricoteuses le résoudra ;
     les deux côtés totalisent bien 577.
-  - **Deux décryptages de juillet 2026** (acétamipride, aide à mourir) manquent
-    à notre table : 60 votes décryptés annoncés contre 62, 238 contre 240 sur
-    `/soutenir`, et le quiz — trié par `numero DESC` — tire trois scrutins
-    différents de ceux du site, puisque les manquants portent les numéros les
-    plus hauts. Récupération par `app:import:decryptages` (§2).
+  - ~~Deux décryptages de juillet 2026 manquants~~ **résorbé, vérifié le
+    4 août** : notre table est alignée à l'unité sur le backup du 15/07
+    (250 = 250, acétamipride et aide à mourir compris, zéro écart dans les
+    deux sens). Le rejeu contre la vraie base au déploiement (§2) reste dû :
+    la rédaction a pu publier depuis le 15/07.
 - **Saint-Barthélemy / Saint-Martin interchangeables** dans la source
   électorale (977/978), sans moyen de trancher : l'import émet un `[WARNING]`
   nommant les deux communes — chiffres à vérifier avant publication.

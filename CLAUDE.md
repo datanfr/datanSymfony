@@ -210,12 +210,16 @@ donnée à porter.
   donne faussement 100 %.
 - **`date_fin` d'un député n'est pas fiable** pour savoir s'il siège : se fonder
   sur l'existence d'un mandat sans date de fin.
-- **Les votes nominatifs n'existent que pour la 17e législature.** Le dépôt des
-  Tricoteuses est `Scrutins_XVII_nettoye` : `vote` ne contient que la 17e
-  (1,27 M lignes), là où `vote_groupe` couvre la 14e à la 17e et `scrutin` les
-  quatre. Toute page qui compte des votes individuels sur une législature
-  passée doit donc se taire, pas afficher zéro — ce n'est pas un défaut
-  d'import.
+- **Les votes nominatifs couvrent les législatures 14 à 17** (2,46 M lignes)
+  depuis l'import des dépôts `Scrutins_XIV/XV/XVI_nettoye` — clos, déclarés
+  `quotidien: false` dans le `Catalogue`, importés une fois pour toutes par
+  `app:import:scrutins --depot=scrutins-xiv --tout` et jamais par le sync.
+  Toute statistique qui compte des votes DOIT filtrer la législature : un
+  réélu porte les lignes de quatre législatures. Et après un tel import, les
+  calculs se rejouent **par législature** :
+  `app:calcul:statistiques-deputes --legislature=N`, qui ne réécrit que la
+  sienne — les lignes des législatures closes survivent au recalcul quotidien
+  de la courante.
 - **`dec` est un mot réservé MariaDB** : ne pas s'en servir comme alias.
 - **Un vote du Congrès porte le même numéro qu'un scrutin de l'Assemblée.** Le
   scrutin n° 1 de la 16e législature existe deux fois ; seul le préfixe d'uid

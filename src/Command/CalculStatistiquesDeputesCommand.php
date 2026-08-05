@@ -7,6 +7,7 @@ use Doctrine\DBAL\Connection;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
+use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Style\SymfonyStyle;
 
@@ -26,9 +27,10 @@ use Symfony\Component\Console\Style\SymfonyStyle;
  * un nouveau scrutin décale participation, loyauté et proximité. Comme les autres
  * précalculs, on la lance sciemment (l'agrégation d'accord prend ~15 s).
  *
- * Les votes nominatifs n'existent que pour la 17e législature (cf. CLAUDE.md) :
- * ces tables ne portent qu'elle, et une fiche d'une législature antérieure se
- * tait faute de données.
+ * La commande traite une législature à la fois (`--legislature`, la courante par
+ * défaut) et ne réécrit que ses lignes : les votes nominatifs des législatures
+ * 14 à 16 (dépôts `Scrutins_XIV/XV/XVI_nettoye`) s'importent une fois pour
+ * toutes, leurs statistiques se calculent de même — seule la 17e bouge encore.
  */
 #[AsCommand(
     name: 'app:calcul:statistiques-deputes',
@@ -81,20 +83,40 @@ class CalculStatistiquesDeputesCommand extends Command
         parent::__construct();
     }
 
+    protected function configure(): void
+    {
+        $this->addOption(
+            'legislature',
+            null,
+            InputOption::VALUE_REQUIRED,
+            'Législature à calculer',
+            (string) Legislature::COURANTE,
+        );
+    }
+
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $io = new SymfonyStyle($input, $output);
-        $io->title('Précalcul des statistiques de comportement des députés');
-        $legislature = Legislature::COURANTE;
+        $legislature = (int) $input->getOption('legislature');
+        $io->title(sprintf('Précalcul des statistiques de comportement des députés — %de législature', $legislature));
 
-        $this->connection->executeStatement('DELETE FROM statistique_depute');
-        $this->connection->executeStatement('DELETE FROM accord_groupe');
+        // Seules les lignes de la législature calculée se réécrivent : celles
+        // des législatures closes, calculées une fois pour toutes, survivent au
+        // recalcul quotidien de la courante.
+        $this->connection->executeStatement(
+            'DELETE FROM statistique_depute WHERE legislature = :leg',
+            ['leg' => $legislature],
+        );
+        $this->connection->executeStatement(
+            'DELETE FROM accord_groupe WHERE legislature = :leg',
+            ['leg' => $legislature],
+        );
 
         $io->text('Participation et loyauté…');
         $lignes = $this->statistiquesDeputes($legislature);
         $this->inserer(
-            'statistique_depute (depute_id, legislature, participation_score, participation_votes, loyaute_score, loyaute_votes, actif)',
-            '(?, ?, ?, ?, ?, ?, ?)',
+            'statistique_depute (depute_id, legislature, participation_score, participation_votes, loyaute_score, loyaute_votes, actif, groupe_id)',
+            '(?, ?, ?, ?, ?, ?, ?, ?)',
             $lignes,
         );
         $io->text(sprintf('  %d députés.', \count($lignes)));
@@ -186,6 +208,16 @@ class CalculStatistiquesDeputesCommand extends Command
             ['leg' => $legislature],
         )));
 
+        // Le groupe du député pour CETTE législature, posé sur la ligne : la
+        // moyenne de groupe d'une fiche ne peut pas se lire sur
+        // `depute.groupe_id`, qui ne porte que l'appartenance courante — sur
+        // une législature close, tous les groupes y sont éteints et la moyenne
+        // sortait vide.
+        $rattachements = $this->connection->fetchAllKeyValue(
+            'SELECT depute_id, groupe_id FROM ' . self::RATTACHEMENT . ' r',
+            ['leg' => $legislature],
+        );
+
         $lignes = [];
         foreach ($comptes as $f) {
             $deputeId = (int) $f['depute_id'];
@@ -210,6 +242,7 @@ class CalculStatistiquesDeputesCommand extends Command
                 $loyauteScore,
                 $loyauteTotal,
                 isset($actifs[$deputeId]) ? 1 : 0,
+                isset($rattachements[$deputeId]) ? (int) $rattachements[$deputeId] : null,
             ];
         }
 

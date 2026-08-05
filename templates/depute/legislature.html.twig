@@ -2,14 +2,15 @@
 
 {# Page « historique » d'un mandat passé (`deputes/individual.php` en mode
    `page_history`) : même coque que la fiche — carte de profil sticky, bio en
-   mode historique, élection du mandat, historique des mandats, partage, réseaux
-   sociaux, contact.
+   mode historique, élection du mandat, comportement politique de la
+   législature consultée, historique des mandats, partage, réseaux sociaux,
+   contact.
 
-   Le bloc « Son comportement politique » de datan.fr (participation, loyauté,
-   proximités de la législature consultée) n'est PAS rendu : les votes
-   nominatifs ne couvrent que la 17e législature (cf. CLAUDE.md) — une page qui
-   compte des votes individuels sur une législature passée se tait plutôt que
-   d'afficher zéro. #}
+   Le bloc « Son comportement politique » est servi depuis l'import des votes
+   nominatifs des législatures 14 à 16 (4 août 2026) : participation, loyauté
+   et proximités de l'époque, mêmes cartes que la fiche. Seule la carte
+   « Proximité avec la majorité gouvernementale » du legacy manque encore
+   (TODO §1 : elle demande un équivalent de `class_majorite`). #}
 
 {% set nom_complet = depute.firstname ~ ' ' ~ depute.lastname %}
 {% set femme = depute.civilite == 'Mme' %}
@@ -26,6 +27,13 @@
 {% block title %}{{ nom_complet }} - Historique {{ legislature }}ème législature | Datan{% endblock %}
 
 {% block meta_description %}Découvrez l'historique {{ femme ? 'de la' : 'du' }} député{{ e }} {{ nom_complet }} pour la {{ legislature }}ème législature : taux de participation, loyauté avec son groupe, proximité avec la majorité présidentielle.{% endblock %}
+
+{% block stylesheets %}
+  {# Jauges circulaires (.c100 pNN) du comportement politique : sans cette
+     feuille, chargée par page comme sur datan.fr, les pourcentages s'affichent
+     en texte nu. #}
+  <link rel="stylesheet" type="text/css" href="{{ asset('assets/css/circle.css') }}">
+{% endblock %}
 
 {% block body %}
 <div class="container-fluid bloc-img-deputes async_background" id="container-always-fluid" style="height: 13em"></div>
@@ -61,6 +69,12 @@
             departement_code: mandat.departement_code ?? depute.departement_code,
           }),
         }) }}
+      {% endif %}
+
+      {% if statistiques %}
+        {# `legislature_stats` bascule le bloc en mode historique : titre
+           suffixé, phrases au passé, liens de groupes vers cette législature. #}
+        {{ include('depute/_statistiques.html.twig', {legislature_stats: legislature}) }}
       {% endif %}
 
       {{ include('depute/_mandats.html.twig') }}

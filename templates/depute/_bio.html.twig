@@ -87,11 +87,30 @@
       </p>
     {% endif %}
 
-    {# Un ancien n'a plus de rattachement courant : `depute.groupe_id` est nul
-       (cf. CLAUDE.md), donc ce paragraphe ne s'affiche que si le dernier groupe
-       est connu — l'échiquier et le parti, propres au présent, sont tus. #}
+    {# La sortie de l'Assemblée et son motif (`_bio.php:45-52`). Le motif est
+       tu sur la page d'une législature passée, comme au legacy — la phrase y
+       parlerait d'un départ postérieur au mandat consulté. #}
+    {% if fin_mandat is defined and fin_mandat and not page_historique %}
+      <p>{{ pronom|capitalize }} a quitté l'Assemblée nationale le {{ fin_mandat.date }}{% if fin_mandat.motif %}{{ fin_mandat.motif starts with '.' ? '' : ' ' }}{{ fin_mandat.motif }}{% endif %}.</p>
+    {% endif %}
+
+    {# Le dernier groupe connu, résolu par `DeputeController::dernierGroupe` :
+       `depute.groupe_id` ne porte que l'appartenance courante, nulle pour un
+       ancien (cf. CLAUDE.md). L'échiquier et le parti, propres au présent,
+       restent tus — comme sur le site. #}
     {% if depute.groupe_libelle and not page_historique %}
       <p>Au cours de son dernier mandat, pendant la {{ leg }}<sup>e</sup> législature, {{ nom_complet }} a siégé avec le groupe {{ depute.groupe_libelle|name_group }} ({{ depute.groupe_abrev }}).</p>
+    {% endif %}
+
+    {# Le rattachement financier au passé (`_bio.php:98-101`) : le legacy sert
+       ce paragraphe aux deux états, seule la conjugaison change. Il manquait à
+       la branche « ancien », qui perdait donc les 26 fiches concernées. #}
+    {% if depute.parti_libelle and not page_historique %}
+      <p>
+        Quand {{ pronom }} était {{ mot_depute }}, {{ nom_complet }} était rattaché{{ e }} financièrement au parti politique
+        <a href="{{ path('parti_individual', {abrev: depute.parti_abrev|lower}) }}">{{ depute.parti_libelle }} ({{ depute.parti_abrev }})</a>.
+        Le rattachement permet aux partis politiques de recevoir, pour chaque député, une subvention publique.
+      </p>
     {% endif %}
   {% endif %}
 

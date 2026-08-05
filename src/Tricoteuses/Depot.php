@@ -16,10 +16,17 @@ namespace App\Tricoteuses;
  */
 final class Depot
 {
+    /**
+     * `$quotidien` dit si le dépôt entre dans la moisson sans option de
+     * `app:tricoteuses:sync` — donc dans `app:sync:quotidien`. Les dépôts des
+     * législatures closes ne bougent plus : ils restent clonables à la demande
+     * (`--depot=scrutins-xiv`) sans être re-tirés chaque nuit pour rien.
+     */
     public function __construct(
         public readonly string $nom,
         public readonly string $url,
         public readonly string $description,
+        public readonly bool $quotidien = true,
     ) {
     }
 

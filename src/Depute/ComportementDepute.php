@@ -2,6 +2,7 @@
 
 namespace App\Depute;
 
+use App\Legislature;
 use Doctrine\DBAL\Connection;
 
 /**
@@ -52,16 +53,23 @@ class ComportementDepute
      * Les « positions importantes » ne sont pas des votes décryptés quelconques :
      * c'est une sélection éditoriale figée de scrutins marquants, codée en dur dans
      * `Votes_model::get_key_votes_mp()`, avec sa reformulation propre. On la reprend
-     * telle quelle. Deux relèvent de la 16e législature, dont nous n'avons AUCUN vote
-     * nominatif (`vote` ne couvre que la 17e, cf. CLAUDE.md) : ces lignes restent donc
-     * absentes de la fiche, faute de donnée — elles ne se fabriquent pas.
+     * telle quelle — sélection ET textes suivent la rédaction, pas nous.
+     *
+     * État du 4 août 2026, vérifié sur le site vivant : quatre scrutins, tous de
+     * la 17e législature, rendus par numéro croissant — l'ordre dans lequel le
+     * site les sert (sa requête sans ORDER BY sort les lignes de `votes_scores`
+     * dans l'ordre d'insertion, qui est celui des numéros). Une sélection
+     * antérieure portait deux scrutins de la 16e (IVG, immigration) : la
+     * rédaction les a retirés, ce qui a éteint au passage la préposition doublée
+     * « en faveur de du projet de loi immigration » — la garde de composition
+     * reste dans `_positions.html.twig`, pour le jour où un texte en « du … »
+     * reviendra.
      */
     private const VOTES_CLES = [
-        ['legislature' => 16, 'numero' => 629, 'texte' => "l'inscription de l'interruption volontaire de grossesse (IVG) dans la Constitution"],
-        ['legislature' => 16, 'numero' => 3213, 'texte' => 'du projet de loi immigration en 2023'],
-        ['legislature' => 17, 'numero' => 2107, 'texte' => "la proposition de loi créant un droit à l'aide à mourir"],
         ['legislature' => 17, 'numero' => 3260, 'texte' => 'la proposition du RN visant à dénoncer les accords franco-algériens de 1968'],
         ['legislature' => 17, 'numero' => 3300, 'texte' => 'la taxe Zucman sur les patrimoines supérieurs à 100 millions d\'euros'],
+        ['legislature' => 17, 'numero' => 8280, 'texte' => "la proposition de loi créant un droit à l'aide à mourir"],
+        ['legislature' => 17, 'numero' => 8427, 'texte' => "la loi d'urgence agricole, qui permet la réintroduction de deux pesticides néonicotinoïdes"],
     ];
 
     public function __construct(
@@ -134,8 +142,8 @@ class ComportementDepute
      * La loyauté (« a voté comme son groupe ») se lit sur la position majoritaire
      * du groupe **au moment du scrutin**, résolu par `fonction_groupe` à la date
      * du vote — comme le `mandat_groupe` du legacy (daily.php:1966). Prendre le
-     * groupe d'aujourd'hui casserait les deux scrutins de la 16e législature (le
-     * groupe courant n'y existait pas) et les changeurs de groupe.
+     * groupe d'aujourd'hui casserait les changeurs de groupe — et toute future
+     * sélection qui repiocherait dans une législature passée.
      *
      * L'ordre éditorial de {@see self::VOTES_CLES} est conservé ; un scrutin sans
      * vote nominatif pour ce député est simplement omis.
@@ -168,8 +176,7 @@ class ComportementDepute
                AND (fg.date_fin IS NULL OR fg.date_fin >= s.date_scrutin)
              LEFT JOIN vote_groupe vg ON vg.scrutin_id = s.id AND vg.groupe_id = fg.groupe_id
              WHERE v.depute_id = :depute AND v.vote_type = :type
-               AND ((s.legislature = 16 AND s.numero IN (629, 3213))
-                 OR (s.legislature = 17 AND s.numero IN (2107, 3260, 3300)))',
+               AND s.legislature = 17 AND s.numero IN (3260, 3300, 8280, 8427)',
             ['depute' => $deputeId, 'type' => self::OFFICIAL],
         );
 
@@ -206,8 +213,10 @@ class ComportementDepute
      * `Depute_service::get_statistics()` : la carte de participation et celle de
      * loyauté ne s'affichent qu'au-delà de dix votes (`votesN >= 10`), et
      * comparent le score du député à la moyenne de tous les députés et de son
-     * groupe. Rendu null si le député n'a pas de ligne — une fiche sans votes
-     * nominatifs, donc d'avant la 17e législature, se tait.
+     * groupe. Rendu null si le député n'a pas de ligne pour la législature
+     * demandée — les quatre législatures publiées (14 à 17) en portent, chacune
+     * calculée par `app:calcul:statistiques-deputes --legislature=N` après
+     * l'import de ses votes nominatifs.
      *
      * @return array<string, mixed>|null
      */
@@ -292,25 +301,37 @@ class ComportementDepute
     }
 
     /**
-     * Moyenne d'une statistique sur tous les députés en exercice, et sur les seuls
-     * députés du groupe. `$colonne` est une valeur interne (`participation_score`
-     * ou `loyaute_score`), jamais une entrée utilisateur.
+     * Moyenne d'une statistique sur tous les députés, et sur les seuls députés
+     * du groupe. `$colonne` est une valeur interne (`participation_score` ou
+     * `loyaute_score`), jamais une entrée utilisateur.
+     *
+     * Le filtre « en exercice » ne vaut que pour la législature courante : sur
+     * une législature close, plus personne ne siège et la moyenne se prend sur
+     * tous ceux qui y ont voté — c'est la condition
+     * `if ($legislature == legislature_current())` que le legacy pose devant
+     * chacun de ses `where('active', 1)` (`get_stats_participation_solennels_all`).
+     *
+     * Le groupe se lit sur `statistique_depute.groupe_id`, résolu par la
+     * commande de calcul pour la législature de la ligne — `depute.groupe_id`
+     * ne porte que l'appartenance courante, et sur une législature passée la
+     * moyenne du groupe sortait vide.
      *
      * @return array{all: int|null, group: int|null}
      */
     private function moyennesStatistique(string $colonne, ?int $groupeId, int $legislature): array
     {
+        $enExercice = $legislature === Legislature::COURANTE ? ' AND actif = 1' : '';
+
         $all = $this->connection->fetchOne(
             "SELECT ROUND(AVG($colonne)) FROM statistique_depute
-             WHERE legislature = :legislature AND actif = 1 AND $colonne IS NOT NULL",
+             WHERE legislature = :legislature AND $colonne IS NOT NULL" . $enExercice,
             ['legislature' => $legislature],
         );
 
         $group = $groupeId === null ? null : $this->connection->fetchOne(
-            "SELECT ROUND(AVG(sd.$colonne)) FROM statistique_depute sd
-             JOIN depute d ON d.id = sd.depute_id
-             WHERE sd.legislature = :legislature AND sd.actif = 1 AND sd.$colonne IS NOT NULL
-               AND d.groupe_id = :groupe",
+            "SELECT ROUND(AVG($colonne)) FROM statistique_depute
+             WHERE legislature = :legislature AND $colonne IS NOT NULL
+               AND groupe_id = :groupe" . $enExercice,
             ['legislature' => $legislature, 'groupe' => $groupeId],
         );
 
@@ -340,51 +361,28 @@ class ComportementDepute
     /**
      * Proximité du député avec chaque groupe (`deputes_accord_cleaned`).
      *
-     * Pour les barres : les groupes encore actifs, hors non-inscrits, au-delà de
-     * dix votes comparables, triés par proximité décroissante — puis les trois du
-     * haut (« souvent ») et les trois du bas (« rarement »), comme le service
-     * d'origine. Pour la phrase éditoriale : le groupe le plus proche et le moins
-     * proche AUTRES que le sien. Pour le classement dépliable : tous les groupes,
-     * dissous compris.
+     * Pour les barres, sur la législature courante : les groupes encore actifs,
+     * hors non-inscrits, au-delà de dix votes comparables, triés par proximité
+     * décroissante — puis les trois du haut (« souvent ») et les trois du bas
+     * (« rarement »), comme le service d'origine. Pour la phrase éditoriale :
+     * le groupe le plus proche et le moins proche AUTRES que le sien. Pour le
+     * classement dépliable : tous les groupes, dissous compris.
+     *
+     * Sur une législature close, tous ses groupes sont éteints : les barres se
+     * prennent alors sur la liste complète — dissous, non-inscrits et petits
+     * dénominateurs compris — et la phrase éditoriale disparaît. C'est la
+     * branche « LEGISLATURE 14 » de `Depute_service::get_statistics()`, qui
+     * remplace `get_accord_groupes_actifs` par `get_accord_groupes_all` et ne
+     * calcule pas de positionnement.
      *
      * @return array<string, mixed>|null
      */
     private function accordGroupes(int $deputeId, ?int $groupeId, int $legislature): ?array
     {
-        $actifs = $this->connection->fetchAllAssociative(
-            "SELECT g.id, g.libelle, g.libelle_abrev, g.couleur, a.accord, a.votes_n
-             FROM accord_groupe a
-             JOIN groupe g ON g.id = a.groupe_id
-             WHERE a.depute_id = :depute AND a.legislature = :legislature
-               AND g.date_fin IS NULL AND g.libelle_abrev <> 'NI' AND a.votes_n > 10
-             ORDER BY a.accord DESC, g.libelle_abrev",
-            ['depute' => $deputeId, 'legislature' => $legislature],
-        );
-
-        if ($actifs === []) {
-            return null;
-        }
-
-        // Découpage du legacy : moitié haute puis trois premiers, moitié basse puis
-        // trois derniers (rendus dans l'ordre croissant pour la seconde barre).
-        $moitie = (int) round(\count($actifs) / 2, 0, \PHP_ROUND_HALF_UP);
-        $premiers = \array_slice(\array_slice($actifs, 0, $moitie), 0, 3);
-        $derniers = array_reverse(\array_slice(\array_slice($actifs, $moitie), -3));
-
-        // Phrase éditoriale : plus proche et moins proche hors de son propre groupe.
-        $autres = array_values(array_filter($actifs, fn (array $g) => (int) $g['id'] !== $groupeId));
-        $proximite = null;
-        if ($autres !== []) {
-            $plusProche = $autres[0];
-            $moinsProche = $autres[\count($autres) - 1];
-            $proximite = [
-                'plus_proche' => $plusProche + ['echiquier' => self::ECHIQUIER[$plusProche['libelle_abrev']] ?? null],
-                'moins_proche' => $moinsProche + ['echiquier' => self::ECHIQUIER[$moinsProche['libelle_abrev']] ?? null],
-            ];
-        }
+        $courante = $legislature === Legislature::COURANTE;
 
         $tous = $this->connection->fetchAllAssociative(
-            "SELECT g.libelle, g.libelle_abrev, a.accord, a.votes_n,
+            "SELECT g.id, g.libelle, g.libelle_abrev, g.couleur, a.accord, a.votes_n,
                     CASE WHEN g.date_fin IS NULL THEN 0 ELSE 1 END AS dissous
              FROM accord_groupe a
              JOIN groupe g ON g.id = a.groupe_id
@@ -392,6 +390,47 @@ class ComportementDepute
              ORDER BY a.accord DESC, g.libelle_abrev",
             ['depute' => $deputeId, 'legislature' => $legislature],
         );
+
+        $barres = $courante
+            ? array_values(array_filter(
+                $tous,
+                static fn (array $g) => !$g['dissous'] && $g['libelle_abrev'] !== 'NI' && (int) $g['votes_n'] > 10,
+            ))
+            : $tous;
+
+        if ($barres === []) {
+            return null;
+        }
+
+        // Découpage du legacy : moitié haute puis trois premiers, moitié basse puis
+        // trois derniers (rendus dans l'ordre croissant pour la seconde barre).
+        $moitie = (int) round(\count($barres) / 2, 0, \PHP_ROUND_HALF_UP);
+        $premiers = \array_slice(\array_slice($barres, 0, $moitie), 0, 3);
+
+        // Les « derniers » se prennent sur un tri croissant refait avec le même
+        // départage par sigle, et non en retournant la fin du tri décroissant :
+        // un ex æquo à cheval sur la coupe changeait le groupe montré. Bernalicis
+        // en 16e — HOR 19, RE 19, DEM 20, LR 20 — doit rendre HOR, RE, DEM comme
+        // le site ; le retournement donnait RE, HOR, LR (l'ex æquo sans départage
+        // du TODO §4, départagé par sigle comme partout).
+        $croissant = $barres;
+        usort($croissant, static fn (array $a, array $b) => [(int) $a['accord'], $a['libelle_abrev']] <=> [(int) $b['accord'], $b['libelle_abrev']]);
+        $derniers = \array_slice($croissant, 0, min(3, max(0, \count($barres) - $moitie)));
+
+        // Phrase éditoriale : plus proche et moins proche hors de son propre
+        // groupe — législature courante seulement, comme le site.
+        $proximite = null;
+        if ($courante) {
+            $autres = array_values(array_filter($barres, fn (array $g) => (int) $g['id'] !== $groupeId));
+            if ($autres !== []) {
+                $plusProche = $autres[0];
+                $moinsProche = $autres[\count($autres) - 1];
+                $proximite = [
+                    'plus_proche' => $plusProche + ['echiquier' => self::ECHIQUIER[$plusProche['libelle_abrev']] ?? null],
+                    'moins_proche' => $moinsProche + ['echiquier' => self::ECHIQUIER[$moinsProche['libelle_abrev']] ?? null],
+                ];
+            }
+        }
 
         return [
             'premiers' => $premiers,

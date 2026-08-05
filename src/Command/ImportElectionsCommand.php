@@ -37,9 +37,14 @@ use Symfony\Component\Console\Style\SymfonyStyle;
  * 2024 sont à tour unique et la base y écrit `0000-00-00`, que MariaDB accepte
  * et que Doctrine refuse de relire en date.
  *
- * Les élections municipales manquent, et c'est volontaire : l'application
- * d'origine les traite sous l'identifiant 7, absent de son propre catalogue —
- * un chantier en cours de son côté, pas une donnée à porter.
+ * Les municipales 2026 (id 7) ont longtemps manqué au catalogue de la
+ * production elle-même ; elle l'a comblé depuis, et leurs candidatures
+ * s'importent comme les autres. Attention : la copie du conteneur `datan-db`
+ * peut retarder sur la production — les TSV du 31 juillet 2026 ont été
+ * regénérés depuis le backup public (`datan.fr/assets/dataset_backup`), plus
+ * frais. Son exportSql.php écrit les NULL en `""`, ce que `drapeau()` et
+ * `texte()` relisent correctement en null ; la copie du conteneur, chargée en
+ * mode laxiste, a figé ces mêmes NULL en `0`.
  */
 #[AsCommand(
     name: 'app:import:elections',

@@ -125,6 +125,26 @@ class Amendement
     #[Groups(['amendement:read', 'amendement:write'])]
     private ?string $signataires = null;
 
+    /**
+     * Type de l'auteur principal (`signataires.auteur.typeAuteur` du dépôt des
+     * Tricoteuses) : « Député », « Rapporteur » ou « Gouvernement ». Sert la
+     * carte « L'auteur de l'amendement » de la page de vote, avec
+     * {@see $auteurRef}. Alimenté par `app:import:auteurs-amendements`.
+     */
+    #[ORM\Column(length: 30, nullable: true)]
+    #[Groups(['amendement:read'])]
+    private ?string $auteurType = null;
+
+    /**
+     * Référence de l'auteur principal : un acteur (`PA…`) pour un député ou un
+     * rapporteur, un organe gouvernemental (`PO…`) pour le Gouvernement — le
+     * fichier source les porte dans deux champs distincts (`acteurRef`,
+     * `gouvernementRef`), exclusifs l'un de l'autre.
+     */
+    #[ORM\Column(length: 30, nullable: true)]
+    #[Groups(['amendement:read'])]
+    private ?string $auteurRef = null;
+
     public function getId(): ?int
     {
         return $this->id;
@@ -270,6 +290,30 @@ class Amendement
     public function setSignataires(?string $signataires): static
     {
         $this->signataires = $signataires;
+
+        return $this;
+    }
+
+    public function getAuteurType(): ?string
+    {
+        return $this->auteurType;
+    }
+
+    public function setAuteurType(?string $auteurType): static
+    {
+        $this->auteurType = $auteurType;
+
+        return $this;
+    }
+
+    public function getAuteurRef(): ?string
+    {
+        return $this->auteurRef;
+    }
+
+    public function setAuteurRef(?string $auteurRef): static
+    {
+        $this->auteurRef = $auteurRef;
 
         return $this;
     }

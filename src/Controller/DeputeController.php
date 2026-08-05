@@ -118,6 +118,18 @@ class DeputeController extends AbstractController
         }
 
         $deputeId = (int) $depute['id'];
+
+        // `depute.groupe_id` ne porte que l'appartenance COURANTE : un ancien
+        // député n'en a aucune (cf. CLAUDE.md), et sa fiche perdait alors son
+        // liseré, le groupe de sa carte de profil, la phrase « a siégé avec le
+        // groupe … » et les moyennes de groupe de son comportement. Le site,
+        // lui, garde le dernier groupe connu dans `deputes_last.groupeId`. On
+        // le reconstitue par le rattachement principal le plus récent — même
+        // règle que {@see ElectionController::candidats}, et que le legacy
+        // (daily.php:914) : encore ouvert d'abord, puis fin la plus tardive.
+        if ($depute['groupe_id'] === null) {
+            $depute = $this->dernierGroupe($deputeId) + $depute;
+        }
         $groupeId = $depute['groupe_id'] !== null ? (int) $depute['groupe_id'] : null;
 
         $mandats = $this->mandats($deputeId);
@@ -165,6 +177,22 @@ class DeputeController extends AbstractController
             // « né le 25 septembre 1989 à Arras » du paragraphe d'ouverture — jour
             // sur deux chiffres, comme le strftime('%d %B %Y') du legacy.
             'naissance' => $this->naissance($depute),
+            // « Il a quitté l'Assemblée nationale le 9 avril 2026 … » : date de
+            // fin du dernier mandat et motif en toutes lettres, pour une fiche
+            // d'ancien député (`_bio.php:45-52`).
+            'fin_mandat' => $actif || $mandats === [] || $mandats[0]['date_fin'] === null ? null : [
+                // Jour sur deux chiffres (« 09 avril 2026 »), comme le
+                // `date_format(…, '%d %M %Y')` du legacy et la date de
+                // naissance juste au-dessus — et non le « 9 avril » de
+                // `date_fr`, qui sert les dates de scrutin.
+                'date' => (new \IntlDateFormatter('fr_FR', \IntlDateFormatter::NONE, \IntlDateFormatter::NONE, null, null, 'dd MMMM y'))
+                    ->format(new \DateTimeImmutable((string) $mandats[0]['date_fin'])),
+                'motif' => $this->motifDeFin((string) $depute['cause_fin'], $depute),
+            ],
+            // Encart « Municipales 2026 » en tête de fiche (`electionFeature.php`) :
+            // la candidature du député, quel que soit son sort — y compris le
+            // « n'est pas candidat » vérifié par la rédaction.
+            'election_feature' => $this->electionMunicipales($deputeId),
             // « Ses participations électorales » et « Ses professions de foi »
             // (`_elections_participation.php`, `_manifesto.php`).
             'participations' => $this->participationsElectorales($deputeId),
@@ -300,10 +328,6 @@ class DeputeController extends AbstractController
             (string) $depute['lastname'],
         );
 
-        // Pas de bloc « comportement politique » ici : les votes nominatifs ne
-        // couvrent que la 17e législature (cf. CLAUDE.md) — datan.fr, qui a les
-        // votes des législatures passées, l'affiche ; nous nous taisons plutôt
-        // que de montrer des zéros (écart documenté, TODO §1).
         $response = $this->render('depute/legislature.html.twig', [
             'depute' => $depute,
             'actif' => $actif,
@@ -312,6 +336,16 @@ class DeputeController extends AbstractController
             'legislature' => $legislature,
             'groupe' => $groupe,
             'election' => $election,
+            // Le bloc « Son comportement politique » de la législature
+            // consultée : servi depuis l'import des votes nominatifs 14-16
+            // (4 août 2026) sur les lignes `statistique_depute` de cette
+            // législature, moyennes de groupe comprises — le groupe est celui
+            // de l'époque. Nul (bloc absent) si le député n'y a pas de ligne.
+            'statistiques' => $this->comportement->statistiques(
+                $deputeId,
+                $groupe !== null ? (int) $groupe['id'] : null,
+                $legislature,
+            ),
             'naissance' => $this->naissance($depute),
             'anciennete' => $this->anciennete($deputeId),
             'contact' => $this->contact($deputeId),
@@ -333,6 +367,67 @@ class DeputeController extends AbstractController
         $response->setSharedMaxAge(self::CACHE_TTL);
 
         return $response;
+    }
+
+    /**
+     * Motif de fin de mandat en toutes lettres (`Depute_edito::get_end_mandate`),
+     * accolé à la phrase « a quitté l'Assemblée nationale le … ».
+     *
+     * **Deux branches du legacy oublient leur `return`** — démission et
+     * annulation de l'élection : sa fonction rend `null`, et le site publie
+     * « … le 09 avril 2026 . », motif manquant et espace avant le point. Ce
+     * sont les deux motifs les plus fréquents après la fin de législature (56 +
+     * 43 + 14 fiches). Le `return` est rétabli ici : c'est un oubli d'écriture,
+     * pas une intention éditoriale — sans quoi les deux chaînes ne seraient pas
+     * dans le code.
+     *
+     * L'ordre des tests est celui de l'origine : « Démission d'office sur
+     * décision du Conseil constitutionnel » avant le « Démission » générique,
+     * qui l'attraperait sinon.
+     *
+     * @param array<string, mixed> $depute
+     */
+    private function motifDeFin(string $cause, array $depute): ?string
+    {
+        return match (true) {
+            str_contains($cause, 'Nomination comme membre du Gouvernement') => 'pour cause de nomination au Gouvernement',
+            str_contains($cause, 'Décès') => 'pour cause de décès',
+            str_contains($cause, "Démission d'office sur décision du Conseil constitutionnel") => 'pour cause de démission sur décision du Conseil constitutionnel',
+            str_contains($cause, 'Démission') => 'pour cause de démission',
+            str_contains($cause, "Annulation de l'élection sur décision du Conseil constitutionnel") => "pour cause d'annulation de l'élection sur décision du Conseil constitutionnel",
+            str_contains($cause, "Reprise de l'exercice du mandat d'un ancien membre du Gouvernement") => sprintf(
+                ". Remplaçant un député nommé au Gouvernement, %s %s a quitté l'Assemblée lorsque celui-ci est redevenu député",
+                $depute['firstname'],
+                $depute['lastname'],
+            ),
+            default => null,
+        };
+    }
+
+    /**
+     * Le dernier groupe connu d'un député qui n'a plus de rattachement ouvert,
+     * dans la forme des colonnes `groupe_*` de la requête de fiche.
+     *
+     * Le rattachement le plus récent et PRINCIPAL : onze députés de la 17e en
+     * portent deux ouverts à la fois, et sans `nomin_principale` le tri
+     * choisirait au hasard entre les deux (cf. CLAUDE.md).
+     *
+     * @return array<string, mixed>
+     */
+    private function dernierGroupe(int $deputeId): array
+    {
+        $groupe = $this->connection->fetchAssociative(
+            'SELECT g.id AS groupe_id, g.libelle AS groupe_libelle, g.libelle_abrev AS groupe_abrev,
+                    g.couleur AS groupe_couleur, g.position_politique
+             FROM fonction_groupe fg
+             JOIN groupe g ON g.id = fg.groupe_id
+             WHERE fg.depute_id = :depute AND fg.nomin_principale = 1
+             ORDER BY fg.date_fin IS NULL DESC, fg.date_fin DESC, fg.date_debut DESC
+             LIMIT 1',
+            ['depute' => $deputeId],
+        );
+
+        return $groupe === false ? [] : $groupe;
     }
 
     /**
@@ -445,9 +540,10 @@ class DeputeController extends AbstractController
      * « Ses participations électorales » (`Elections_model::get_candidate_elections`
      * avec `visible = 1` et `candidature = 1`, tri par année décroissante).
      *
-     * Le libellé de circonscription suit `get_district` : le nom du département
-     * pour des législatives — seule sorte en base à ce jour, les municipales 2026
-     * n'étant pas portées (cf. CLAUDE.md) ; à défaut, le district brut.
+     * Le libellé de circonscription suit `get_district`, qui branche sur la
+     * sorte d'élection — la colonne est polymorphe (cf. {@see \App\Entity\Candidature}) :
+     * le nom du département pour des législatives, celui de la commune pour des
+     * municipales ; à défaut, le district brut.
      *
      * @return list<array<string, mixed>>
      */
@@ -455,14 +551,127 @@ class DeputeController extends AbstractController
     {
         return $this->connection->fetchAllAssociative(
             "SELECT e.annee, e.libelle, c.elu,
-                    COALESCE(dep.nom, c.district) AS district
+                    COALESCE(dep.nom, co.nom, c.district) AS district
              FROM candidature c
              JOIN election e ON e.id = c.election_id
              LEFT JOIN departement dep ON e.libelle_abrege = 'Législatives' AND dep.code = c.district
+             LEFT JOIN commune co ON e.libelle_abrege = 'Municipales' AND co.code_insee = c.district
              WHERE c.depute_id = :depute AND c.visible = 1 AND c.candidat = 1
              ORDER BY e.annee DESC",
             ['depute' => $deputeId],
         );
+    }
+
+    /**
+     * L'encart « Municipales 2026 » en tête de fiche
+     * (`Elections_model::get_candidate_election($mp, 7, TRUE, FALSE)` +
+     * `City_model::get_city_by_insee`, vue `deputes/partials/electionFeature.php`).
+     *
+     * Le seul critère est la visibilité : une candidature vérifiée s'affiche
+     * quel que soit son sort, y compris négative (« n'est pas candidat ») et
+     * y compris pour un ancien député — le site sert l'encart sur la fiche
+     * d'Emmanuel Grégoire, qui ne siège plus. La couleur de la carte reprend la
+     * cascade du modèle d'origine : sort connu d'abord, second tour ensuite,
+     * candidature enfin.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function electionMunicipales(int $deputeId): ?array
+    {
+        $candidature = $this->connection->fetchAssociative(
+            "SELECT c.position, c.candidat, c.second_tour, c.elu, c.lien,
+                    co.nom AS commune_nom, co.slug AS commune_slug, co.population,
+                    dep.slug AS commune_dpt_slug
+             FROM candidature c
+             JOIN election e ON e.id = c.election_id
+             LEFT JOIN commune co ON co.code_insee = c.district
+             LEFT JOIN departement dep ON dep.id = co.departement_id
+             WHERE c.depute_id = :depute AND e.slug = 'municipales-2026' AND c.visible = 1
+             LIMIT 1",
+            ['depute' => $deputeId],
+        );
+
+        if ($candidature === false) {
+            return null;
+        }
+
+        $elu = $candidature['elu'] === null ? null : (bool) $candidature['elu'];
+        $secondTour = $candidature['second_tour'] === null ? null : (bool) $candidature['second_tour'];
+        $candidat = $candidature['candidat'] === null ? null : (bool) $candidature['candidat'];
+
+        return [
+            'elu' => $elu,
+            'second_tour' => $secondTour,
+            'candidat' => $candidat,
+            'tete_de_liste' => $candidature['position'] === 'Tête de liste',
+            'lien' => $candidature['lien'],
+            'couleur' => match (true) {
+                $elu === true => 'results-success',
+                $elu === false, $secondTour === false => 'results-fail',
+                $secondTour === true, $candidat === true => 'information-success',
+                $candidat === false => 'information-fail',
+                default => 'information-success',
+            },
+            // La commune peut manquer : une candidature négative n'a pas
+            // toujours de district. L'encart tient alors en une phrase.
+            'commune' => $candidature['commune_nom'] === null ? null : [
+                'nom' => $candidature['commune_nom'],
+                'nom_de' => $this->communeAvecDe((string) $candidature['commune_nom']),
+                'nom_a' => $this->communeAvecA((string) $candidature['commune_nom']),
+                'slug' => $candidature['commune_slug'],
+                'dpt_slug' => $candidature['commune_dpt_slug'],
+                // Sous ce seuil, le lien vers les résultats passe par url_obf,
+                // comme toutes les adresses d'élections des petites communes.
+                'lien_clair' => (int) $candidature['population'] > ElectionController::POPULATION_MINIMALE,
+            ],
+        ];
+    }
+
+    /**
+     * « de Brest », « du Havre », « des Abymes », « de la Rochelle »,
+     * « d'Aix-en-Provence » : la colonne `nom_de` des `cities` du legacy,
+     * recomposée — notre référentiel des communes ne la porte pas. L'article du
+     * nom se contracte ou s'abaisse ; l'élision joue sur toute initiale
+     * vocalique, trait d'union compris (« d'Évry »), là où la fiche de ville
+     * suit une règle plus fruste ({@see CommuneController::elision}) — les deux
+     * reproduisent chacune leur colonne d'origine.
+     */
+    private function communeAvecDe(string $nom): string
+    {
+        if (str_starts_with($nom, 'Le ')) {
+            return 'du ' . substr($nom, 3);
+        }
+        if (str_starts_with($nom, 'Les ')) {
+            return 'des ' . substr($nom, 4);
+        }
+        if (str_starts_with($nom, 'La ')) {
+            return 'de la ' . substr($nom, 3);
+        }
+        if (str_starts_with($nom, "L'")) {
+            return "de l'" . substr($nom, 2);
+        }
+
+        return \in_array(mb_substr($nom, 0, 1), ['A', 'E', 'I', 'O', 'U', 'Y', 'É', 'È', 'Î', 'Ô'], true)
+            ? "d'" . $nom
+            : 'de ' . $nom;
+    }
+
+    /**
+     * « à Brest », « au Havre », « aux Abymes » — et « à La Rochelle », où la
+     * colonne `nom_a` du legacy perd l'article (« Résultats des élections à
+     * Rochelle », « à Aigle ») : même famille de défaut que « à la La Réunion »,
+     * déjà corrigée ailleurs — l'article fait partie du nom, il reste.
+     */
+    private function communeAvecA(string $nom): string
+    {
+        if (str_starts_with($nom, 'Le ')) {
+            return 'au ' . substr($nom, 3);
+        }
+        if (str_starts_with($nom, 'Les ')) {
+            return 'aux ' . substr($nom, 4);
+        }
+
+        return 'à ' . $nom;
     }
 
     /**

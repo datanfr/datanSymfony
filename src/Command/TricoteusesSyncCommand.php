@@ -3,6 +3,7 @@
 namespace App\Command;
 
 use App\Tricoteuses\Catalogue;
+use App\Tricoteuses\Depot;
 use App\Tricoteuses\Moisson;
 use App\Tricoteuses\Moissonneur;
 use Symfony\Component\Console\Attribute\AsCommand;
@@ -53,7 +54,10 @@ class TricoteusesSyncCommand extends Command
             return Command::SUCCESS;
         }
 
-        $noms = $input->getOption('depot') ?: array_keys(Catalogue::tous());
+        // Sans --depot, seuls les dépôts vivants : ceux des législatures closes
+        // ne bougent plus et n'ont rien à faire dans la moisson quotidienne.
+        $noms = $input->getOption('depot')
+            ?: array_keys(array_filter(Catalogue::tous(), static fn (Depot $d) => $d->quotidien));
 
         $io->title('Moisson des Tricoteuses');
 

@@ -40,6 +40,24 @@
       {{ include('partials/campagne.html.twig', {classes: 'mt-5'}) }}
 
       <div class="bloc-bio mt-5">
+        {# Encart « Municipales 2026 » (`groupes/partials/electionFeature.php`),
+           servi dans le bloc-bio, avant son titre, comme sur le site. Nul —
+           donc absent — hors législature courante ou tant que la donnée
+           d'`app:import:elections` n'est pas là ; zéro, en revanche, s'affiche :
+           « Aucun député du groupe … n'est candidat » est une information. #}
+        {% if election_municipales is not null %}
+          <div class="card card-election-feature information-success mb-5 border-0" style="overflow: hidden">
+            <div class="card-body">
+              <h2 class="text-white">🗳️ Municipales 2026</h2>
+              {% if election_municipales == 0 %}
+                <p class="mb-0">Aucun député du groupe {{ groupe.libelle_abrev }} n'est candidat aux élections municipales de 2026.</p>
+              {% else %}
+                <p class="mb-0">Il y a {{ election_municipales }} député{{ election_municipales > 1 ? 's' : '' }} membre{{ election_municipales > 1 ? 's' : '' }} du groupe {{ groupe.libelle_abrev }} candidat{{ election_municipales > 1 ? 's' : '' }} aux élections municipales de 2026.</p>
+              {% endif %}
+              <a href="{{ path('elections_individual', {slug: 'municipales-2026'}) }}" class="mt-3 btn btn-light">En savoir plus sur ces élections</a>
+            </div>
+          </div>
+        {% endif %}
         <h2 class="mb-4 title-center">Le groupe {{ groupe.libelle_abrev }} en quelques mots</h2>
         {% if non_inscrits %}
           <p>Les députés non inscrits (NI) ne sont pas membres d'un groupe politique.</p>
@@ -290,7 +308,10 @@
                 <p>Cette statistique sera disponible dès qu'un nombre suffisant de votes sera atteint pour le groupe {{ nom_groupe }}.</p>
               </div></div>
             {% else %}
-              {% set coh = comportement.cohesion_moyenne|round(2) %}
+              {# Virgule décimale française (« 0,95 » où le site écrit « 0.95 ») :
+                 correction typographique assumée, même règle que les pages de
+                 classement et la page statistiques — cf. TODO §4. #}
+              {% set coh = comportement.cohesion_moyenne|number_format(2, ',', ' ') %}
               <div class="row">
                 <div class="col-lg-3 offset-lg-1 mt-2">
                   <div class="d-flex justify-content-center align-items-center">
@@ -303,7 +324,7 @@
                 <div class="col-lg-8 infos mt-4 mt-lg-2">
                   <div class="texte ml-md-3 pl-md-3 mt-md-0 mt-3">
                     <p>Avec un taux de cohésion de {{ coh }},{{ non_inscrits ? ' les députés non inscrits peuvent être considérés' : ' le groupe ' ~ groupe.libelle_abrev ~ ' peut être considéré' }} comme <b>{{ cohesion_edito.absolute }} soudé{{ non_inscrits ? 's' : '' }}</b> quand il {{ actif ? "s'agit" : "s'agissait" }} de voter.</p>
-                    <p>Le groupe {{ actif ? 'est' : 'était' }} en effet <b>{{ cohesion_edito.relative }} uni</b> que la moyenne de tous les groupes, qui est de {{ moyennes.cohesion }}.</p>
+                    <p>Le groupe {{ actif ? 'est' : 'était' }} en effet <b>{{ cohesion_edito.relative }} uni</b> que la moyenne de tous les groupes, qui est de {{ moyennes.cohesion|number_format(2, ',', ' ') }}.</p>
                     <div class="d-flex justify-content-center mt-3">
                       <a href="{{ lien_statistiques }}#cohesion" class="btn btn-outline-primary text-center">Voir l'historique</a>
                     </div>
@@ -478,6 +499,44 @@
       </div>
 
       {{ include('groupe/partials/partage.html.twig') }}
+
+      {# Bloc « En savoir plus » (fin de `groupes/individual.php`) : site,
+         Facebook et X du groupe, d'après la table de la rédaction
+         (`ReseauxGroupe`, transcrite de `Groupes_model::get_groupe_social_media`).
+         Les adresses passent toutes par `url_obf` — système en place, à ne pas
+         modifier (cf. CLAUDE.md) : ces liens sortants restent hors du graphe que
+         voient les moteurs. Les logos sont inlinés et `main.css` les colore via
+         `.btn-… svg path`, comme sur la fiche d'un député. Le lien Wikipédia de
+         la table n'est pas rendu : le site ne l'affiche pas non plus. #}
+      {% if liens.site is defined or liens.facebook is defined or liens.x is defined %}
+        <div class="bloc-links p-lg-0 p-md-2 mt-5">
+          <h2 class="title-center">En savoir plus</h2>
+          <div class="row mt-4">
+            {% if liens.site is defined %}
+              <div class="col-12 col-sm-6 mt-2 d-flex justify-content-center">
+                <span class="url_obf btn btn-website" url_obf="{{ url_obf(liens.site) }}">
+                    Site internet
+                </span>
+              </div>
+            {% endif %}
+            {% if liens.facebook is defined %}
+              <div class="col-12 col-sm-6 mt-2 d-flex justify-content-center">
+                <span class="url_obf btn btn-fcb" url_obf="{{ url_obf('https://www.facebook.com/' ~ liens.facebook) }}">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="1298" height="2500" viewBox="88.428 12.828 107.543 207.085"><path d="M158.232 219.912v-94.461h31.707l4.747-36.813h-36.454V65.134c0-10.658 2.96-17.922 18.245-17.922l19.494-.009V14.278c-3.373-.447-14.944-1.449-28.406-1.449-28.106 0-47.348 17.155-47.348 48.661v27.149H88.428v36.813h31.788v94.461l38.016-.001z"/></svg>
+                    <span class="ml-3">Facebook</span>
+                </span>
+              </div>
+            {% endif %}
+            {% if liens.x is defined %}
+              <div class="col-12 col-sm-6 mt-2 d-flex justify-content-center">
+                <span class="url_obf btn btn-twitter" url_obf="{{ url_obf('https://x.com/' ~ liens.x) }}">
+                    <svg width="1200" height="1227" viewBox="0 0 1200 1227" xmlns="http://www.w3.org/2000/svg"><path d="M714.163 519.284 1160.89 0h-105.86L667.137 450.887 357.328 0H0l468.492 681.821L0 1226.37h105.86l409.626-476.152 327.181 476.152H1200L714.137 519.284h.026Z"/></svg>
+                </span>
+              </div>
+            {% endif %}
+          </div>
+        </div>
+      {% endif %}
     </div>
   </div>
 </div>

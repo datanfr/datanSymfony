@@ -9,8 +9,15 @@
    `main.css`, reprise du site. Les icônes sont inlinées : la feuille colore
    `.card-statistiques .icon path` en vert. #}
 {% set pronom = depute.civilite == 'Mme' ? 'elle' : 'il' %}
+{# `legislature_stats` : posé par la seule page /legislature-N — le bloc passe
+   alors en mode historique, comme `statistics/_index.php` quand la législature
+   consultée n'est pas la courante : titre suffixé, phrases au passé
+   (« Pendant la 16e législature… », « votait », « était »), et liens de
+   groupes vers la législature de l'époque. #}
+{% set legislature_stats = legislature_stats|default(null) %}
+{% set leg_groupes = legislature_stats|default(17) %}
 <div class="bloc-statistiques mt-5">
-  <h2 class="mb-3 title-center">Son comportement politique</h2>
+  <h2 class="mb-3 title-center">Son comportement politique{% if legislature_stats %} ({{ legislature_stats }}<sup>e</sup> législature){% endif %}</h2>
 
   {% if statistiques.participation %}
     {% set p = statistiques.participation %}
@@ -42,16 +49,26 @@
           </div>
           <div class="col-lg-8 infos mt-4 mt-lg-2">
             <div class="texte ml-md-3 pl-md-3 mt-md-0 mt-3">
-              {% if actif %}
-                <p>Depuis sa prise de fonctions, {{ nom_complet }} a participé à {{ p.score }}% des votes solennels à l'Assemblée nationale.</p>
+              {% if legislature_stats %}
+                <p>Pendant la {{ legislature_stats }}<sup>e</sup> législature, {{ nom_complet }} a participé à {{ p.score }}% des votes solennels à l'Assemblée nationale.</p>
+                {% if p.edito_all and p.all is not null %}
+                  <p>{{ pronom|capitalize }} votait <b>{{ p.edito_all }}</b> que la moyenne des députés, qui était {{ p.edito_all == 'autant' ? 'également ' }}de {{ p.all }}%.</p>
+                {% endif %}
+                {% if p.edito_group and p.group is not null %}
+                  <p>De plus, {{ nom_complet }} votait <b>{{ p.edito_group }}</b> que la moyenne des députés de son groupe politique, qui était {{ p.edito_group == 'autant' ? 'également ' }}de {{ p.group }}%.</p>
+                {% endif %}
               {% else %}
-                <p>Quand {{ pronom }} était en activité à l'Assemblée, {{ nom_complet }} a participé à {{ p.score }}% des votes solennels à l'Assemblée nationale.</p>
-              {% endif %}
-              {% if p.edito_all and p.all is not null %}
-                <p>{{ pronom|capitalize }} {{ actif ? 'vote' : 'votait' }} <b>{{ p.edito_all }}</b> que la moyenne des députés, qui est {{ p.edito_all == 'autant' ? 'également ' }}de {{ p.all }}%.</p>
-              {% endif %}
-              {% if p.edito_group and p.group is not null %}
-                <p>De plus, {{ nom_complet }} {{ actif ? 'vote' : 'votait' }} <b>{{ p.edito_group }}</b> que la moyenne des députés de son groupe politique, qui est {{ p.edito_group == 'autant' ? 'également ' }}de {{ p.group }}%.</p>
+                {% if actif %}
+                  <p>Depuis sa prise de fonctions, {{ nom_complet }} a participé à {{ p.score }}% des votes solennels à l'Assemblée nationale.</p>
+                {% else %}
+                  <p>Quand {{ pronom }} était en activité à l'Assemblée, {{ nom_complet }} a participé à {{ p.score }}% des votes solennels à l'Assemblée nationale.</p>
+                {% endif %}
+                {% if p.edito_all and p.all is not null %}
+                  <p>{{ pronom|capitalize }} {{ actif ? 'vote' : 'votait' }} <b>{{ p.edito_all }}</b> que la moyenne des députés, qui est {{ p.edito_all == 'autant' ? 'également ' }}de {{ p.all }}%.</p>
+                {% endif %}
+                {% if p.edito_group and p.group is not null %}
+                  <p>De plus, {{ nom_complet }} {{ actif ? 'vote' : 'votait' }} <b>{{ p.edito_group }}</b> que la moyenne des députés de son groupe politique, qui est {{ p.edito_group == 'autant' ? 'également ' }}de {{ p.group }}%.</p>
+                {% endif %}
               {% endif %}
               <p>Les votes solennels sont les votes considérés comme importants pour lesquels les députés connaissent à l'avance le jour et l'heure du vote.</p>
             </div>
@@ -91,15 +108,25 @@
           </div>
           <div class="col-lg-8 infos mt-4 mt-lg-2">
             <div class="texte ml-md-3 pl-md-3 mt-md-0 mt-3">
-              <p>{{ nom_complet }} a voté sur la même ligne que son groupe politique dans {{ l.score }}% des cas.</p>
-              {% if l.edito_all and l.all is not null %}
-                <p>{{ pronom|capitalize }} a un taux de proximité avec son groupe <b>{{ l.edito_all }}</b> que la moyenne des députés, qui est {{ l.edito_all == 'aussi élevé' ? 'également ' }}de {{ l.all }}%.</p>
-              {% endif %}
-              {% if l.edito_group and l.group is not null %}
-                {# Le legacy écrit ici « la moyenne des députés de MON groupe »
-                   (copié-collé de la version à la première personne) : coquille,
-                   rétablie en « son ». #}
-                <p>De plus, son taux de proximité est <b>{{ l.edito_group }}</b> que la moyenne des députés de son groupe, qui est {{ l.edito_group == 'aussi élevé' ? 'également ' }}de {{ l.group }}%.</p>
+              {% if legislature_stats %}
+                <p>Pendant la {{ legislature_stats }}<sup>e</sup> législature, {{ nom_complet }} a voté sur la même ligne que son groupe politique dans {{ l.score }}% des cas.</p>
+                {% if l.edito_all and l.all is not null %}
+                  <p>{{ pronom|capitalize }} avait un taux de proximité avec son groupe <b>{{ l.edito_all }}</b> que la moyenne des députés, qui était {{ l.edito_all == 'aussi élevé' ? 'également ' }}de {{ l.all }}%.</p>
+                {% endif %}
+                {% if l.edito_group and l.group is not null %}
+                  <p>De plus, son taux de proximité était <b>{{ l.edito_group }}</b> que la moyenne des députés de son groupe, qui était {{ l.edito_group == 'aussi élevé' ? 'également ' }}de {{ l.group }}%.</p>
+                {% endif %}
+              {% else %}
+                <p>{{ nom_complet }} a voté sur la même ligne que son groupe politique dans {{ l.score }}% des cas.</p>
+                {% if l.edito_all and l.all is not null %}
+                  <p>{{ pronom|capitalize }} a un taux de proximité avec son groupe <b>{{ l.edito_all }}</b> que la moyenne des députés, qui est {{ l.edito_all == 'aussi élevé' ? 'également ' }}de {{ l.all }}%.</p>
+                {% endif %}
+                {% if l.edito_group and l.group is not null %}
+                  {# Le legacy écrit ici « la moyenne des députés de MON groupe »
+                     (copié-collé de la version à la première personne) : coquille,
+                     rétablie en « son ». #}
+                  <p>De plus, son taux de proximité est <b>{{ l.edito_group }}</b> que la moyenne des députés de son groupe, qui est {{ l.edito_group == 'aussi élevé' ? 'également ' }}de {{ l.group }}%.</p>
+                {% endif %}
               {% endif %}
               {% if l.historique %}
                 {% set mot_depute = depute.civilite == 'Mme' ? 'de la députée' : 'du député' %}
@@ -115,7 +142,7 @@
                     <tbody>
                       {% for h in l.historique %}
                         <tr>
-                          <td><a href="{{ path('groupe_individual', {legislature: 17, abrev: h.libelle_abrev|lower}) }}" class="no-decoration underline">{{ h.libelle|name_group }}</a></td>
+                          <td><a href="{{ path('groupe_individual', {legislature: leg_groupes, abrev: h.libelle_abrev|lower}) }}" class="no-decoration underline">{{ h.libelle|name_group }}</a></td>
                           <td class="text-center">{{ h.score }}%</td>
                         </tr>
                       {% endfor %}
@@ -150,23 +177,25 @@
           </div>
         </div>
 
-        {% if a.proximite %}
-          <div class="row"><div class="offset-2 col-10"><h4>{{ nom_complet }} vote <b>souvent</b> avec :</h4></div></div>
+        {# Le titre du graphique s'affiche aussi en mode historique — le site
+           écrit alors « votait » (`_inter_group_loyalty.php:38`). #}
+        {% if a.proximite or legislature_stats %}
+          <div class="row"><div class="offset-2 col-10"><h4>{{ nom_complet }} {{ legislature_stats ? 'votait' : 'vote' }} <b>souvent</b> avec :</h4></div></div>
         {% endif %}
         {{ include('depute/_barres_accord.html.twig', {groupes: a.premiers}) }}
         {% if a.proximite and depute.groupe_abrev != 'NI' %}
           <div class="row mt-3"><div class="offset-2 col-10">
             <p>En plus de son propre groupe, {{ nom_complet }} vote souvent (dans {{ a.proximite.plus_proche.accord }}% des cas) avec le groupe
-              <a href="{{ path('groupe_individual', {legislature: 17, abrev: a.proximite.plus_proche.libelle_abrev|lower}) }}">{{ a.proximite.plus_proche.libelle_abrev }}</a>{% if a.proximite.plus_proche.echiquier %}, classé {{ a.proximite.plus_proche.echiquier }} de l'échiquier politique{% endif %}.</p>
+              <a href="{{ path('groupe_individual', {legislature: leg_groupes, abrev: a.proximite.plus_proche.libelle_abrev|lower}) }}">{{ a.proximite.plus_proche.libelle_abrev }}</a>{% if a.proximite.plus_proche.echiquier %}, classé {{ a.proximite.plus_proche.echiquier }} de l'échiquier politique{% endif %}.</p>
           </div></div>
         {% endif %}
 
-        <div class="row mt-5"><div class="col-10 offset-2"><h4>{{ pronom|capitalize }} vote <b>rarement</b> avec :</h4></div></div>
+        <div class="row mt-5"><div class="col-10 offset-2"><h4>{{ pronom|capitalize }} {{ legislature_stats ? 'votait' : 'vote' }} <b>rarement</b> avec :</h4></div></div>
         {{ include('depute/_barres_accord.html.twig', {groupes: a.derniers}) }}
         {% if a.proximite %}
           <div class="row mt-3"><div class="col-10 offset-2">
             <p>À l'opposé, le groupe avec lequel {{ nom_complet }} est le moins proche est
-              <a href="{{ path('groupe_individual', {legislature: 17, abrev: a.proximite.moins_proche.libelle_abrev|lower}) }}">{{ a.proximite.moins_proche.libelle|name_group }}</a>{% if a.proximite.moins_proche.echiquier %}, classé {{ a.proximite.moins_proche.echiquier }} de l'échiquier politique{% endif %}.
+              <a href="{{ path('groupe_individual', {legislature: leg_groupes, abrev: a.proximite.moins_proche.libelle_abrev|lower}) }}">{{ a.proximite.moins_proche.libelle|name_group }}</a>{% if a.proximite.moins_proche.echiquier %}, classé {{ a.proximite.moins_proche.echiquier }} de l'échiquier politique{% endif %}.
               {{ pronom|capitalize }} ne vote avec ce groupe que dans <b>{{ a.proximite.moins_proche.accord }}%</b> des cas.</p>
           </div></div>
         {% endif %}

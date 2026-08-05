@@ -2,6 +2,7 @@
 
 namespace App\Command;
 
+use App\CorrectionTitreScrutin;
 use App\NatureVote;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
@@ -79,6 +80,9 @@ class ImportScrutinsCommand extends ImportTricoteusesCommand
         'par_delegation', 'scrutin_date', 'created_at', 'updated_at',
     ];
 
+    /** Votes nominatifs écartés faute de député connu (acteurRef absent de `depute`). */
+    private int $votesEcartes = 0;
+
     protected function depotParDefaut(): string
     {
         return 'scrutins';
@@ -110,7 +114,13 @@ class ImportScrutinsCommand extends ImportTricoteusesCommand
         $uids = [];
         $refsDossier = [];
         $lot = [];
-        foreach ($this->fichiers($chemin, 'AN', $tout) as $fichier) {
+        // Les dépôts n'ont pas tous la même charpente : Scrutins XVI et XVII
+        // séparent l'Assemblée (`AN/`) du Congrès (`CG/`), que l'on écarte —
+        // ses votes vivent sous `vote_c<n>` et son numéro entre en collision
+        // avec celui d'un scrutin ordinaire. Scrutins XIV et XV rangent tout à
+        // la racine (`R5/`), sans aucun fichier du Congrès : on y lit tout.
+        $sousDossier = is_dir($chemin . '/AN') ? 'AN' : '';
+        foreach ($this->fichiers($chemin, $sousDossier, $tout) as $fichier) {
             $scrutin = $this->lisJson($fichier);
             if ($scrutin === null || !isset($scrutin['uid'])) {
                 continue;
@@ -147,7 +157,9 @@ class ImportScrutinsCommand extends ImportTricoteusesCommand
         }
 
         $ventilations = 0;
+        $ventilationsEcartees = 0;
         $votes = 0;
+        $this->votesEcartes = 0;
         $lotVentilation = [];
         $lotVote = [];
 
@@ -180,6 +192,7 @@ class ImportScrutinsCommand extends ImportTricoteusesCommand
 
                 $groupeId = $groupes[$organeRef] ?? null;
                 if ($groupeId === null) {
+                    ++$ventilationsEcartees;
                     continue;
                 }
 
@@ -220,6 +233,19 @@ class ImportScrutinsCommand extends ImportTricoteusesCommand
 
         $io->text(sprintf('%d ventilations par groupe, %d votes nominatifs.', $ventilations, $votes));
 
+        // Un import qui écarte des lignes rend l'écart à l'unité : sans ce
+        // bilan, une règle fausse ressemble en tout point à une source
+        // incomplète (cf. CLAUDE.md).
+        if ($ventilationsEcartees > 0 || $this->votesEcartes > 0) {
+            $io->warning(sprintf(
+                'Écartés : %d ventilation%s (groupe inconnu de la table `groupe`), %d vote%s (député inconnu de la table `depute`).',
+                $ventilationsEcartees,
+                $ventilationsEcartees > 1 ? 's' : '',
+                $this->votesEcartes,
+                $this->votesEcartes > 1 ? 's' : '',
+            ));
+        }
+
         $rattaches = $this->rattacheDecryptages();
         $io->text(sprintf('Décryptages rattachés à leur scrutin : %d.', $rattaches));
 
@@ -244,7 +270,10 @@ class ImportScrutinsCommand extends ImportTricoteusesCommand
             $this->entier($scrutin['numero'] ?? null),
             $this->entier($scrutin['legislature'] ?? null),
             $this->date($scrutin['dateScrutin'] ?? null),
-            $scrutin['titre'] ?? null,
+            // Coquilles et intitulés périmés de l'open data, corrigés à la
+            // main comme sur datan.fr. L'objet reste brut : il n'est affiché
+            // nulle part et app:lien:scrutins y lit le numéro d'amendement.
+            CorrectionTitreScrutin::corriger($scrutin['titre'] ?? null),
             $objet,
             $scrutin['sort']['code'] ?? null,
             $scrutin['sort']['libelle'] ?? null,
@@ -317,6 +346,7 @@ class ImportScrutinsCommand extends ImportTricoteusesCommand
             foreach ($decompte[$cle] ?? [] as $votant) {
                 $deputeId = $deputes[$votant['acteurRef'] ?? ''] ?? null;
                 if ($deputeId === null) {
+                    ++$this->votesEcartes;
                     continue;
                 }
 

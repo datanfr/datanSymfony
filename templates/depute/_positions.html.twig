@@ -5,10 +5,7 @@
    ou non son groupe.
 
    L'ancienne fiche portait ici deux colonnes pour/contre listant des votes
-   décryptés quelconques — ni la bonne sélection, ni la bonne mise en forme.
-
-   Deux des cinq votes de la sélection relèvent de la 16e législature, dont nous
-   n'avons aucun vote nominatif : ces lignes manquent donc (cf. TODO §1). #}
+   décryptés quelconques — ni la bonne sélection, ni la bonne mise en forme. #}
 {% if positions_importantes %}
   {% set e = depute.civilite == 'Mme' ? 'e' : '' %}
   {% set pronom = depute.civilite == 'Mme' ? 'elle' : 'il' %}
@@ -26,7 +23,12 @@
                 <div class="col-md-9 value">
                   {{ nom_complet }}
                   <b>
-                    {%- if p.position == 'pour' %} a voté en faveur de
+                    {# « en faveur de » + un texte commençant par « du »/« des »
+                       doit se contracter (« en faveur du projet… ») : composé
+                       tel quel, le site a publié « a voté en faveur de du
+                       projet de loi immigration ». Défaut, pas choix — la
+                       préposition tombe devant un article déjà contracté. #}
+                    {%- if p.position == 'pour' %} a voté en faveur {{ p.texte starts with 'du ' or p.texte starts with 'des ' ? '' : 'de ' }}
                     {%- elseif p.position == 'contre' %} a voté contre
                     {%- else %} s'est abstenu{{ e }} sur le vote concernant
                     {%- endif %}
