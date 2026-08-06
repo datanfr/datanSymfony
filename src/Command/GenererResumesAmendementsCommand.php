@@ -22,6 +22,11 @@ use Symfony\Component\Console\Style\SymfonyStyle;
  * résumé relu (resume_relu) est du contenu approuvé. On ne génère que le
  * manquant ; pour regénérer, on efface d'abord la colonne, sciemment.
  *
+ * Cette garde a un revers : un lot passé au modèle d'essai bloque pour toujours
+ * un lot plus propre, puisque la colonne n'est plus nulle. D'où `--simulation`,
+ * qui génère et affiche sans rien écrire — le seul moyen d'éprouver un modèle
+ * (et l'échelle de simplicité qu'il rend) avant d'arrêter `IA_MODELE`.
+ *
  * Hors du sync quotidien : chaque exécution appelle un modèle (local ou
  * facturé) — on la lance sciemment, comme les imports de récupération.
  * L'écran /admin/amendements montre le résultat, à relire avant affichage
@@ -49,7 +54,8 @@ class GenererResumesAmendementsCommand extends Command
         $this
             ->addOption('legislature', null, InputOption::VALUE_REQUIRED, 'Législature des scrutins', (string) Legislature::COURANTE)
             ->addOption('jours', null, InputOption::VALUE_REQUIRED, 'Fenêtre en jours avant aujourd\'hui', '30')
-            ->addOption('limite', null, InputOption::VALUE_REQUIRED, 'Nombre maximal de résumés générés par exécution', '50');
+            ->addOption('limite', null, InputOption::VALUE_REQUIRED, 'Nombre maximal de résumés générés par exécution', '50')
+            ->addOption('simulation', null, InputOption::VALUE_NONE, 'Génère et affiche sans rien écrire : éprouve un modèle sans consommer le lot');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
@@ -66,6 +72,7 @@ class GenererResumesAmendementsCommand extends Command
         $legislature = (int) $input->getOption('legislature');
         $jours = max(1, (int) $input->getOption('jours'));
         $limite = max(1, (int) $input->getOption('limite'));
+        $simulation = (bool) $input->getOption('simulation');
         $depuis = (new \DateTimeImmutable())->modify(sprintf('-%d days', $jours))->format('Y-m-d');
 
         // Un amendement peut porter plusieurs scrutins (rectifications) : le
@@ -90,11 +97,16 @@ class GenererResumesAmendementsCommand extends Command
             return Command::SUCCESS;
         }
 
-        $io->text(sprintf('%d amendement%s sans résumé (modèle : %s).', \count($amendements), \count($amendements) > 1 ? 's' : '', $this->moteur->modele()));
+        $io->text(sprintf('%d amendement%s sans résumé (modèle : %s)%s.',
+            \count($amendements), \count($amendements) > 1 ? 's' : '', $this->moteur->modele(),
+            $simulation ? ' — simulation, rien ne sera écrit' : '',
+        ));
 
         $generes = 0;
         $echecs = 0;
         $echecsConsecutifs = 0;
+        /** @var array<int, int> notes obtenues, pour rendre l'échelle réellement produite */
+        $echelle = array_fill_keys(range(1, 5), 0);
 
         foreach ($amendements as $amendement) {
             $resume = $this->generateur->generer([
@@ -113,22 +125,39 @@ class GenererResumesAmendementsCommand extends Command
             }
             $echecsConsecutifs = 0;
 
-            // resume_ia IS NULL rejoué à l'écriture : si la rédaction a rempli
-            // la colonne entre la sélection et maintenant, elle gagne.
-            $this->connection->executeStatement(
-                'UPDATE amendement
-                 SET titre_ia = ?, resume_ia = ?, simplicite_ia = ?
-                 WHERE id = ? AND resume_ia IS NULL',
-                [$resume['titre'], $resume['resume'], $resume['simplicite'], $amendement['id']],
-            );
+            if (!$simulation) {
+                // resume_ia IS NULL rejoué à l'écriture : si la rédaction a rempli
+                // la colonne entre la sélection et maintenant, elle gagne.
+                $this->connection->executeStatement(
+                    'UPDATE amendement
+                     SET titre_ia = ?, resume_ia = ?, simplicite_ia = ?
+                     WHERE id = ? AND resume_ia IS NULL',
+                    [$resume['titre'], $resume['resume'], $resume['simplicite'], $amendement['id']],
+                );
+            }
             ++$generes;
+            ++$echelle[$resume['simplicite']];
 
-            $io->text(sprintf('  scrutin n° %s → « %s » (simplicité %d)', $amendement['numero'], $resume['titre'], $resume['simplicite']));
+            $io->text(sprintf('  scrutin n° %s → « %s » (simplicité %d/5)', $amendement['numero'], $resume['titre'], $resume['simplicite']));
+            if ($simulation) {
+                // En simulation, rien ne sera relu dans /admin/amendements : le
+                // résumé ne se juge qu'ici.
+                $io->text(sprintf('    %s', $resume['resume']));
+            }
         }
 
-        $io->success(sprintf('%d résumé%s généré%s, %d échec%s — relecture dans /admin/amendements.',
+        if ($generes > 0) {
+            $io->newLine();
+            $io->text('Échelle de simplicité obtenue (1 très technique → 5 très accessible) :');
+            foreach ($echelle as $note => $nombre) {
+                $io->text(sprintf('  %d/5 : %s %d', $note, str_pad(str_repeat('█', $nombre), 20, '·'), $nombre));
+            }
+        }
+
+        $io->success(sprintf('%d résumé%s généré%s, %d échec%s — %s',
             $generes, $generes > 1 ? 's' : '', $generes > 1 ? 's' : '',
             $echecs, $echecs > 1 ? 's' : '',
+            $simulation ? 'simulation : aucune écriture, le lot reste disponible.' : 'relecture dans /admin/amendements.',
         ));
 
         return $echecs > 0 && $generes === 0 ? Command::FAILURE : Command::SUCCESS;

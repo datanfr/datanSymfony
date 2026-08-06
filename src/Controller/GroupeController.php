@@ -11,6 +11,7 @@ use App\FamilleGroupe;
 use App\FamilleSocioPro;
 use App\Groupe\EditoGroupe;
 use App\Groupe\MoyennesAssemblee;
+use App\Groupe\ParticipationGroupe;
 use App\Groupe\ReseauxGroupe;
 use App\Groupe\SoutienGouvernement;
 use App\Groupe\StatistiquesGroupe;
@@ -972,8 +973,7 @@ class GroupeController extends AbstractController
         $row = $this->connection->fetchAssociative(
             'SELECT COUNT(*) AS scrutins,
                     ROUND(AVG(' . self::COHESION_SQL . '), 3) AS cohesion_moyenne,
-                    ROUND(AVG((vg.nombre_pours + vg.nombre_contres + vg.nombre_abstentions)
-                              / NULLIF(vg.nombre_membres_groupe, 0)) * 100) AS participation_moyenne
+                    ROUND(AVG(' . ParticipationGroupe::SQL . ') * 100) AS participation_moyenne
              FROM vote_groupe vg
              WHERE vg.groupe_id = :groupe',
             ['groupe' => $groupeId],

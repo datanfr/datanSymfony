@@ -24,52 +24,6 @@ redirigée en 301, ou écartée pour une raison consignée au §3.
       paragraphe et une modale sur les activités déclarées à la HATVP. La table
       `hatvp` du backup public est **vide (0 ligne)** : même traitement que les
       professions de foi.
-- [ ] **Le bloc auteur de la page de vote n'a que sa variante amendement.** La
-      carte « L'auteur de l'amendement » (député ou Gouvernement) est portée le
-      4 août — la donnée ne demandait **aucun scraping**, contrairement à ce que
-      ce fichier affirmait : `amendementsAuteurs()` (daily.php:3753) lit les
-      archives XML de l'open data, et le dépôt Tricoteuses des amendements porte
-      la même structure `signataires.auteur` en JSON
-      (`app:import:auteurs-amendements`, hors sync, à rejouer après un import
-      d'amendements). Restent les deux variantes du même bloc que sert datan.fr
-      sur les votes **sans** amendement : « Le rapporteur » et « L'auteur de la
-      proposition de loi » (`Votes::index`, `get_dossier_mp_authors` /
-      `get_dossier_mp_rapporteurs`) — elles demandent les initiateurs et
-      rapporteurs de dossier (`dossiers_auteurs`, `documents_legislatifs`), que
-      nous n'importons pas encore ; l'acte `AN1-COM-FOND` des dossiers
-      Tricoteuses ouvre peut-être la voie, comme pour `commission_fond`.
-- [ ] **La participation d'un groupe sur une page de vote diverge d'un point.**
-      Sur le scrutin 8409 de la 17e, EPR sort à 13 % chez nous contre 12 % sur
-      le site, LFI-NFP à 23 % contre 21 % — mêmes numérateurs (12 et 16), donc
-      un dénominateur différent : nous divisons par
-      `vote_groupe.nombre_membres_groupe` (91 et 71, la ventilation publiée par
-      l'Assemblée), le site par un effectif plus large (~97 et ~75, sans doute
-      sa table `groupes_effectif`). Écart de calcul, pas d'affichage — à
-      trancher avec les autres reprises de `vote_groupe`.
-- [ ] **Statistiques d'une législature passée (`/legislature-N`) : reste la
-      carte de la majorité.** Les votes nominatifs des
-      législatures 14 à 16 sont importés le 4 août (dépôts
-      `Scrutins_XIV/XV/XVI_nettoye`, 111 244 + 475 212 + 604 815 lignes, zéro
-      écartée — `vote` couvre désormais 2,46 M de lignes sur les quatre
-      législatures), et les calculs dérivés sont rejoués **par législature**
-      (`app:calcul:statistiques-deputes --legislature=N`, qui ne réécrit que la
-      sienne ; `statistique_depute` porte désormais le `groupe_id` de l'époque).
-      `ComportementDepute` sait servir une législature close : moyennes sans
-      filtre d'activité, barres de proximité sur tous les groupes et sans phrase
-      éditoriale — les règles du `Depute_service` du legacy. Vérifié contre le
-      site vivant sur Bernalicis : 15e (95 %, moyennes 91/96, loyauté 100,
-      moyennes 94/99) et 16e (95 %, moyenne 83 ; loyauté 100, moyennes 96/99 ;
-      proximités LFI-NUPES 100/894, ECOLO 88, HOR 19, RE 19, DEM 20) — tout au
-      point près, sauf SOC-A 78 contre 79 (un vote sur 140, famille des chiffres
-      d'époque figés du §4, ne pas courir après). Les pages de vote 14-16
-      servent déjà leur détail nominatif (vote 1200 de la 15e : 24 contre /
-      6 pour, identique au site). Le branchement d'affichage est fait le
-      4 août : `DeputeController::legislature()` passe `statistiques` (groupe
-      de l'époque) et `depute/legislature.html.twig` rend le bloc — vérifié sur
-      Bernalicis 15e et 16e, mêmes chiffres que la validation ci-dessus. Reste,
-      pour la parité complète de cette fiche, la carte « Proximité avec la
-      majorité gouvernementale » des 14e-16e, qui demande un équivalent de
-      `class_majorite` (la 17e n'a pas de majorité déclarée, cf. CLAUDE.md).
 - [ ] **Les photos détourées de datan.fr ne sont pas dans ce dépôt.** Le site
       sert un portrait détouré, recadré carré en 240 × 240 depuis la 17e
       (`assets/imgs/deputes_original/`) ou en 150 × 192 avant
@@ -92,14 +46,24 @@ redirigée en 301, ou écartée pour une raison consignée au §3.
       d'amendement, 3 numéros discordants, et les pages des sans-dossier
       n'offrent rien non plus. L'écart est chez la source : l'Assemblée n'a pas
       complété ses pages. À relancer de loin en loin, rien à corriger chez nous.
-- [ ] **`simplicite_ia`** : la colonne « Simplicité » de l'écran des amendements
-      s'affiche « — » tant que la génération IA ne la produit pas (le legacy la
-      rend en étoiles 1-5). À brancher dans `app:ia:resumes-amendements` le jour
-      où le modèle de production est choisi.
+- [ ] **`simplicite_ia` des résumés repris de la production.** La génération la
+      produit désormais (entier 1-5, même échelle et même invite que
+      PoliticAnalysis, qui la poussait sur `/api/amendements_ia`) et l'écran des
+      amendements la rend comme le legacy — badge « n/5 », vert à partir de 4,
+      orange à 3, rouge en dessous. Restent « — » les 137 résumés repris de la
+      base d'origine : leur note existe dans `amendements_ia.simplicite_ia`, mais
+      le TSV lu par `app:import:annexes` s'arrête à `reviewed`. Une neuvième
+      colonne à l'export et au `flush()` la récupérerait — avec la garde
+      `COALESCE(VALUES(c), c)`, sans quoi rejouer un ancien TSV effacerait les
+      notes générées depuis.
 - [ ] **Résumés d'amendements en lot** (`app:ia:resumes-amendements`) : à lancer
       sciemment **après** le choix d'`IA_MODELE` de production — la garde
       « jamais écraser un résumé existant » fait qu'un lot passé au modèle
-      d'essai local bloquerait pour toujours un lot plus propre.
+      d'essai local bloquerait pour toujours un lot plus propre. Pour éprouver un
+      modèle sans consommer le lot : `--simulation`, qui génère, affiche et
+      n'écrit rien (elle rend aussi la distribution des notes de simplicité —
+      gemma4:latest en a donné 5 à des amendements techniques, cf. le rapport
+      d'essai : l'échelle d'un petit modèle local n'est pas celle attendue).
 
 ## 2. Au déploiement
 
@@ -131,6 +95,12 @@ Rien à coder d'avance ; à dérouler le jour J, dans cet ordre de préférence.
 - [ ] **Planification** : `bin\planifier-sync.ps1` (sync quotidien) ;
       `app:calcul:statistiques-deputes` **après chaque import de votes** (hors
       sync) ; `app:moissonner:bluesky` à la demande.
+- [ ] **Cloner les dépôts figés et rejouer leurs imports** : ils ne sont pas
+      dans la moisson nocturne et n'existent donc que sur la machine où on les a
+      demandés. `scrutins-xiv`/`-xv`/`-xvi` (`app:import:scrutins --tout`, puis
+      `app:calcul:statistiques-deputes --legislature=N`), `dossiers-xv` et
+      `dossiers-xvi` (`app:import:dossiers-acteurs --depot=…`, sans quoi le bloc
+      auteur des pages de vote de 2017-2024 reste vide sur 2 500 scrutins).
 - [ ] **Niveau serveur** : redirection https (le hook `ssl.php` du legacy y est
       resté) ; si des tiers consomment l'ancienne API (`api/tables`,
       `api/votes`, `api/exposes`…), poser des redirections — API Platform ne
@@ -195,11 +165,35 @@ Rien à coder d'avance ; à dérouler le jour J, dans cet ordre de préférence.
   et sortaient donc en HTML visible, balises et entités en toutes lettres.
   Le test porte désormais sur `'<p'`. À se rappeler pour toute garde qui
   reconnaît du HTML à une balise nue.
+- **Une page de vote peut montrer un dossier — et son auteur — là où le site
+  n'en montre aucun.** Le lien scrutin → dossier n'est pas dans l'open data
+  avant 2026 et le legacy le **scrape** (`assemblee-nationale.fr/dyn/`) ; nous
+  le tenons du fichier de scrutin des Tricoteuses. Là où son scraping n'a rien
+  ramené, datan.fr n'affiche ni le dossier, ni son titre, ni le bloc auteur, et
+  nous les affichons tous les trois — vu sur le scrutin 6269 de la 17e (une
+  demande de suspension de séance sur la proposition de loi rapportée par
+  Charles Rodwell), 1 des 96 pages comparées le 5 août. C'est un manque de leur
+  côté, pas un choix : ne pas s'aligner en retirant ce que nous savons.
 - **Une cellule de cohésion vide n'est pas un zéro.** Un groupe dont personne
   n'a voté (« Non votant ») affiche une cellule vide sur datan.fr ; nous
   écrivions `0.000`, ce qui affirme un groupe parfaitement désuni là où il n'y
   a rien à mesurer. `VoteController::groupBreakdown` rend `null` sur zéro
   exprimé depuis le 4 août.
+- **La participation d'un groupe est plus haute que sur datan.fr, et c'est le
+  site qui a tort.** Le legacy calcule cette part de deux façons : `total /
+  (membres − nonVotants)` dans `daily.php:2620`, qui alimente `class_groups` et
+  toutes les participations de ses fiches de groupe, mais `(pours + contres +
+  abstentions − nonVotants) / membres` sur sa seule page de vote
+  (`Votes_model::get_vote_groupes`) — le `− nonVotants` a changé de côté de la
+  division. Or les non-votants forment un ensemble **disjoint** des votants
+  (`decompteNominatif` du scrutin 8409 : le non-votant EPR n'est pas parmi les
+  douze « pour »), si bien que le numérateur du site passe sous zéro sur 609
+  lignes, qu'il rattrape par un `WHEN pct < 0 THEN 0` : le scrutin 3170 y
+  affiche « contre : 6 » et « participation : 0 % » sur la même ligne. Nous
+  divisons partout par les membres en mesure de voter (`ParticipationGroupe`,
+  qui porte la démonstration). Écart attendu, toujours à la hausse, sur 24 996
+  des 196 050 ventilations — à ne pas « corriger » vers le site. Les moyennes de
+  groupe, elles, sont inchangées : l'écart disparaît à l'arrondi.
 - **`VOTES_CLES` est une sélection éditoriale vivante — la resynchroniser sur le
   legacy, pas la deviner.** Le 4 août 2026, `Votes_model::get_key_votes_mp()` et
   le site vivant servaient quatre scrutins, tous 17e (3260, 3300, 8280, 8427),
@@ -210,6 +204,15 @@ Rien à coder d'avance ; à dérouler le jour J, dans cet ordre de préférence.
   de du projet de loi » est morte avec le texte qui la portait, mais la garde de
   composition reste dans `_positions.html.twig` : un texte en « du … » se
   contracte en « en faveur du … », datan.fr publiait le doublon.
+- **Le titre « … votait rarement avec : » est vide sur datan.fr en mode
+  historique — pas chez nous.** `$second_section_title` n'est affecté que dans
+  le `if (isset($proximite))` de `_inter_group_loyalty.php`, et `Depute_service`
+  ne calcule `$proximite` que pour la législature courante : sur
+  `/deputes/…/legislature-16`, le site sort un `<h4>` sans texte au-dessus du
+  second graphique, quand le titre symétrique (« votait souvent avec : »),
+  affecté hors de la garde, s'affiche bien. Variable oubliée, pas choix
+  éditorial — nous écrivons le titre. Écart visible sur capture, à ne pas
+  « corriger » vers le site.
 - **Le pied de la fiche de groupe de datan.fr parle de la législature
   précédente — pas nous.** Sur `/groupes/legislature-17/lfi-nfp`, le site titre
   « Les groupes parlementaires de la 16ème législature » au-dessus de liens qui
@@ -582,3 +585,15 @@ Rien à coder d'avance ; à dérouler le jour J, dans cet ordre de préférence.
 - **Un import complet est mort une fois sans message** (22 juillet), signature
   du `cache:clear` concurrent de CLAUDE.md, non reproduit depuis. À rouvrir
   s'il récidive hors de cette circonstance.
+- **L'Assemblée publie parfois `PO0` en guise d'`organeRef`** dans la ventilation
+  d'un scrutin — quatorze fois sur la 17e : les scrutins 489 et 491 à 501 du
+  2 décembre 2024, où **tous** les groupes le portent, plus un bloc isolé sur
+  les scrutins 1302 et 6256. Rien sur les législatures 14 à 16, et les
+  Tricoteuses recopient le fichier tel quel : la correction nous revient.
+  `ImportScrutinsCommand` reconstitue les 146 blocs en deux temps — le groupe
+  des votants du bloc quand il en a (134), l'élimination des groupes déjà placés
+  quand il est muet (12). Les quatorze scrutins se referment sur leur synthèse
+  et totalisent les mêmes 574 sièges que le scrutin 490, voisin épargné du même
+  jour. **À surveiller** : si la source récidive avec plusieurs blocs muets aux
+  effectifs voisins, l'élimination renoncera au scrutin entier plutôt que de
+  placer au jugé, et le dira en fin d'import.

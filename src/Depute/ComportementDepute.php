@@ -3,6 +3,7 @@
 namespace App\Depute;
 
 use App\Legislature;
+use Doctrine\DBAL\ArrayParameterType;
 use Doctrine\DBAL\Connection;
 
 /**
@@ -26,6 +27,12 @@ class ComportementDepute
 {
     /** Type de vote nominatif officiel (`decompteNominatif`), le seul décompté par député. */
     private const OFFICIAL = 'decompteNominatif';
+
+    /** Qualification d'un groupe soutenant le Gouvernement (`organes.positionPolitique`). */
+    private const MAJORITAIRE = 'Majoritaire';
+
+    /** Borne haute conventionnelle d'un groupe encore en activité, pour le tri par fin de mandat. */
+    private const SANS_FIN = '9999-12-31';
 
     /**
      * Positionnement éditorial d'un groupe sur l'échiquier gauche/centre/droite,
@@ -210,11 +217,11 @@ class ComportementDepute
     /**
      * Statistiques de comportement de la fiche, lues sur les tables précalculées
      * par {@see \App\Command\CalculStatistiquesDeputesCommand}. Reproduit
-     * `Depute_service::get_statistics()` : la carte de participation et celle de
-     * loyauté ne s'affichent qu'au-delà de dix votes (`votesN >= 10`), et
-     * comparent le score du député à la moyenne de tous les députés et de son
-     * groupe. Rendu null si le député n'a pas de ligne pour la législature
-     * demandée — les quatre législatures publiées (14 à 17) en portent, chacune
+     * `Depute_service::get_statistics()` : les cartes de participation, de loyauté
+     * et de proximité avec la majorité ne s'affichent qu'au-delà de dix votes
+     * (`votesN >= 10`), et comparent le score du député à la moyenne de tous les
+     * députés et de son groupe. Rendu null si le député n'a pas de ligne pour la
+     * législature demandée — les quatre législatures publiées (14 à 17) en portent, chacune
      * calculée par `app:calcul:statistiques-deputes --legislature=N` après
      * l'import de ses votes nominatifs.
      *
@@ -223,7 +230,8 @@ class ComportementDepute
     public function statistiques(int $deputeId, ?int $groupeId, int $legislature): ?array
     {
         $stat = $this->connection->fetchAssociative(
-            'SELECT participation_score, participation_votes, loyaute_score, loyaute_votes
+            'SELECT participation_score, participation_votes, loyaute_score, loyaute_votes,
+                    majorite_score, majorite_votes
              FROM statistique_depute WHERE depute_id = :depute AND legislature = :legislature',
             ['depute' => $deputeId, 'legislature' => $legislature],
         );
@@ -263,12 +271,88 @@ class ComportementDepute
             ];
         }
 
+        $majorite = $this->proximiteMajorite($stat, $groupeId, $legislature);
+        if ($majorite !== null) {
+            $resultat['majorite'] = $majorite;
+        }
+
         $accord = $this->accordGroupes($deputeId, $groupeId, $legislature);
         if ($accord !== null) {
             $resultat['accord'] = $accord;
         }
 
         return $resultat !== [] ? $resultat : null;
+    }
+
+    /**
+     * La carte « Proximité avec la majorité gouvernementale »
+     * (`_majority_alignment.php`, alimentée par `class_majorite`).
+     *
+     * Trois conditions la font apparaître, toutes reprises de l'origine :
+     *
+     * - la législature déclare un groupe majoritaire. **La 17e n'en a pas** :
+     *   depuis la dissolution de 2024 l'Assemblée ne qualifie plus ses groupes
+     *   (cf. CLAUDE.md), et le site masque d'ailleurs la carte pour elle par une
+     *   condition écrite en toutes lettres dans sa vue. Rien ne se rabat sur un
+     *   groupe choisi au jugé ;
+     * - le député n'appartient pas lui-même à la majorité : se comparer à son
+     *   propre groupe ne dit rien, et la loyauté le dit déjà mieux ;
+     * - il a au moins dix votes comparables, seuil commun aux trois cartes.
+     *
+     * La moyenne de référence — « la moyenne des députés **non membres de la
+     * majorité** » — écarte les groupes majoritaires, alors que celle du groupe
+     * se prend sur le groupe du député comme partout ailleurs.
+     *
+     * Le groupe nommé dans la phrase est « le plus gros de la majorité » selon
+     * l'origine, qui prend en fait le dernier en date (`get_majority_group`) —
+     * ce qui ne se voit qu'en 14e, la seule à en déclarer deux qui se succèdent :
+     * SER, et non SRC, malgré ses 1 275 scrutins contre 79.
+     *
+     * @param array<string, mixed> $stat
+     *
+     * @return array<string, mixed>|null
+     */
+    private function proximiteMajorite(array $stat, ?int $groupeId, int $legislature): ?array
+    {
+        if ($stat['majorite_score'] === null || (int) $stat['majorite_votes'] < 10) {
+            return null;
+        }
+
+        $majoritaires = $this->connection->fetchAllAssociative(
+            'SELECT id, libelle, libelle_abrev FROM groupe
+             WHERE legislature = :legislature AND position_politique = :majoritaire
+             ORDER BY COALESCE(date_fin, :sansFin) DESC
+             LIMIT 1',
+            ['legislature' => $legislature, 'majoritaire' => self::MAJORITAIRE, 'sansFin' => self::SANS_FIN],
+        );
+
+        if ($majoritaires === [] || $groupeId === null) {
+            return null;
+        }
+
+        // Tous les groupes majoritaires de la législature, pas seulement celui
+        // que la phrase nomme : en 14e, un député SRC comme un député SER est
+        // membre de la majorité, et sa fiche n'a pas cette carte.
+        $idsMajoritaires = array_map('intval', $this->connection->fetchFirstColumn(
+            'SELECT id FROM groupe WHERE legislature = :legislature AND position_politique = :majoritaire',
+            ['legislature' => $legislature, 'majoritaire' => self::MAJORITAIRE],
+        ));
+
+        if (\in_array($groupeId, $idsMajoritaires, true)) {
+            return null;
+        }
+
+        $score = (int) $stat['majorite_score'];
+        $moyennes = $this->moyennesStatistique('majorite_score', $groupeId, $legislature, $idsMajoritaires);
+
+        return [
+            'score' => $score,
+            'all' => $moyennes['all'],
+            'group' => $moyennes['group'],
+            'edito_all' => $this->comparerStatistique($score, $moyennes['all'], 'proche'),
+            'edito_group' => $this->comparerStatistique($score, $moyennes['group'], 'proche'),
+            'groupe' => $majoritaires[0],
+        ];
     }
 
     /**
@@ -316,16 +400,34 @@ class ComportementDepute
      * ne porte que l'appartenance courante, et sur une législature passée la
      * moyenne du groupe sortait vide.
      *
+     * `$exclus` retire des groupes de la moyenne « tous députés » : la carte de
+     * la majorité se compare aux seuls députés qui n'en sont pas membres
+     * (`get_stats_majorite_all`). Un député sans groupe pour la législature en
+     * sort aussi — `NOT IN` sur un `NULL` ne retient rien, et c'est bien ce que
+     * fait le `where_not_in` de l'origine sur son `LEFT JOIN deputes_all`.
+     *
+     * @param list<int> $exclus
+     *
      * @return array{all: int|null, group: int|null}
      */
-    private function moyennesStatistique(string $colonne, ?int $groupeId, int $legislature): array
+    private function moyennesStatistique(string $colonne, ?int $groupeId, int $legislature, array $exclus = []): array
     {
         $enExercice = $legislature === Legislature::COURANTE ? ' AND actif = 1' : '';
 
+        $horsMajorite = '';
+        $params = ['legislature' => $legislature];
+        $types = [];
+        if ($exclus !== []) {
+            $horsMajorite = ' AND groupe_id NOT IN (:exclus)';
+            $params['exclus'] = $exclus;
+            $types['exclus'] = ArrayParameterType::INTEGER;
+        }
+
         $all = $this->connection->fetchOne(
             "SELECT ROUND(AVG($colonne)) FROM statistique_depute
-             WHERE legislature = :legislature AND $colonne IS NOT NULL" . $enExercice,
-            ['legislature' => $legislature],
+             WHERE legislature = :legislature AND $colonne IS NOT NULL" . $enExercice . $horsMajorite,
+            $params,
+            $types,
         );
 
         $group = $groupeId === null ? null : $this->connection->fetchOne(
@@ -343,7 +445,8 @@ class ComportementDepute
 
     /**
      * « plus/moins/autant » du député face à une moyenne (`Depute_edito`). La
-     * loyauté se dit « plus/moins élevé », la participation « plus/moins souvent ».
+     * loyauté se dit « plus/moins élevé », la participation « plus/moins
+     * souvent », la majorité « plus/moins proche ».
      */
     private function comparerStatistique(?int $score, ?int $moyenne, string $registre): ?string
     {
@@ -353,6 +456,10 @@ class ComportementDepute
 
         if ($registre === 'souvent') {
             return $score < $moyenne ? 'moins souvent' : ($score > $moyenne ? 'plus souvent' : 'autant');
+        }
+
+        if ($registre === 'proche') {
+            return $score < $moyenne ? 'moins proche' : ($score > $moyenne ? 'plus proche' : 'aussi proche');
         }
 
         return $score < $moyenne ? 'moins élevé' : ($score > $moyenne ? 'plus élevé' : 'aussi élevé');

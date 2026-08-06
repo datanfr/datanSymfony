@@ -4,6 +4,7 @@ namespace App\Command;
 
 use App\Enum\TypeClassement;
 use App\FamilleSocioPro;
+use App\Groupe\ParticipationGroupe;
 use App\Legislature;
 use Doctrine\DBAL\Connection;
 use Symfony\Component\Console\Attribute\AsCommand;
@@ -718,7 +719,8 @@ class CalculClassementsCommand extends Command
     /**
      * Taux de participation moyen des groupes : par scrutin, la part des membres
      * qui se sont exprimés. Les non-votants — présidence de séance, membres du
-     * Gouvernement — sortent du dénominateur, n'ayant pas le droit de voter.
+     * Gouvernement — sortent du dénominateur, n'ayant pas le droit de voter
+     * (cf. ParticipationGroupe).
      *
      * @return list<array{id: int, score: float, numerateur: null, denominateur: int, tri: array<int|string>}>
      */
@@ -730,8 +732,7 @@ class CalculClassementsCommand extends Command
 
         $rows = $this->connection->fetchAllAssociative(
             'SELECT g.id,
-                    AVG((vg.nombre_pours + vg.nombre_contres + vg.nombre_abstentions)
-                        / NULLIF(vg.nombre_membres_groupe - vg.non_votants, 0)) AS taux,
+                    AVG(' . ParticipationGroupe::SQL . ') AS taux,
                     COUNT(*) AS scrutins
              FROM vote_groupe vg
              JOIN groupe g ON g.id = vg.groupe_id

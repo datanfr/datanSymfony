@@ -50,8 +50,7 @@ final class StatistiquesGroupe
            / NULLIF(vg.nombre_pours + vg.nombre_contres + vg.nombre_abstentions, 0)';
 
     /** Part des membres ayant pris part au vote sur une ligne de `vote_groupe`. */
-    private const PARTICIPATION_SQL = '(vg.nombre_pours + vg.nombre_contres + vg.nombre_abstentions)
-           / NULLIF(vg.nombre_membres_groupe, 0)';
+    private const PARTICIPATION_SQL = ParticipationGroupe::SQL;
 
     /**
      * Deux groupes sont comptés d'accord lorsqu'ils ont voté pour tous les deux

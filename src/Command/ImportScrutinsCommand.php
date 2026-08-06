@@ -157,6 +157,9 @@ class ImportScrutinsCommand extends ImportTricoteusesCommand
         }
 
         $ventilations = 0;
+        $ventilationsDeduites = 0;
+        $ventilationsParElimination = 0;
+        $ventilationsSansIndice = 0;
         $ventilationsEcartees = 0;
         $votes = 0;
         $this->votesEcartes = 0;
@@ -175,8 +178,29 @@ class ImportScrutinsCommand extends ImportTricoteusesCommand
             }
 
             $date = $this->date($scrutin['dateScrutin'] ?? null);
+            // Un groupe ne peut tenir qu'une ligne par scrutin (clé unique
+            // scrutin_id + groupe_id). Sans cette garde, deux blocs ramenés au
+            // même groupe — par la réattribution SOC ci-dessous ou par une
+            // déduction fausse — se recouvriraient en silence dans l'upsert.
+            $groupesVus = [];
+            $orphelins = [];
 
             foreach ($scrutin['ventilationVotes']['groupes'] ?? [] as $groupe) {
+                $decompteNominatif = $groupe['vote']['decompteNominatif'] ?? [];
+
+                // Les votes nominatifs se lisent avant toute résolution de
+                // groupe : une ligne `vote` est (député, scrutin, position) et
+                // ne doit rien au bloc qui la porte. Les lire dans la foulée du
+                // groupe faisait perdre 1 916 votes des quatorze scrutins à
+                // l'organeRef illisible (cf. plus bas) — le détail nominatif
+                // d'un scrutin entier disparaissait avec sa ventilation.
+                if (!$sansVotes) {
+                    foreach ($this->votesNominatifs($decompteNominatif, $deputes, $scrutinId, $date, self::VOTE_OFFICIEL, $maintenant) as $ligne) {
+                        $lotVote[] = $ligne;
+                        ++$votes;
+                    }
+                }
+
                 // L'Assemblée publie les ventilations du groupe socialiste de
                 // la 16e sous PO800496 même après son changement de nom en
                 // SOC-A (PO830170) le 19/10/2023 : sans réattribution, 581
@@ -191,24 +215,53 @@ class ImportScrutinsCommand extends ImportTricoteusesCommand
                 }
 
                 $groupeId = $groupes[$organeRef] ?? null;
+                $deduit = false;
                 if ($groupeId === null) {
+                    $groupeId = $this->groupeDeduit($decompteNominatif, $date);
+                    $deduit = $groupeId !== null;
+                }
+
+                if ($groupeId === null) {
+                    // Bloc muet : aucun votant à interroger. Mis de côté plutôt
+                    // qu'écarté — l'élimination, elle, le retrouvera une fois
+                    // tous les autres blocs du scrutin placés.
+                    $orphelins[] = $groupe;
+                    continue;
+                }
+
+                if (isset($groupesVus[$groupeId])) {
                     ++$ventilationsEcartees;
                     continue;
                 }
 
-                $lotVentilation[] = $this->ligneVentilation($groupe, $scrutinId, $groupeId);
+                $groupesVus[$groupeId] = true;
+                $lotVentilation[] = $this->ligneVentilation($groupe, $scrutinId, (int) $groupeId);
                 ++$ventilations;
-
-                if (!$sansVotes) {
-                    foreach ($this->votesNominatifs($groupe['vote']['decompteNominatif'] ?? [], $deputes, $scrutinId, $date, self::VOTE_OFFICIEL, $maintenant) as $ligne) {
-                        $lotVote[] = $ligne;
-                        ++$votes;
-                    }
-                }
+                $ventilationsDeduites += $deduit ? 1 : 0;
 
                 if (\count($lotVentilation) >= self::TAILLE_LOT) {
                     $this->upsert('vote_groupe', self::COLONNES_VENTILATION, $lotVentilation, \array_slice(self::COLONNES_VENTILATION, 2));
                     $lotVentilation = [];
+                }
+            }
+
+            // Second passage : les blocs muets se déduisent des groupes que le
+            // premier n'a pas consommés. Il faut que tous les autres soient
+            // placés pour que le reste soit sûr — d'où deux passages.
+            if ($orphelins !== []) {
+                $parElimination = $this->groupesParElimination($orphelins, $groupesVus, $date);
+
+                foreach ($orphelins as $rang => $groupe) {
+                    $groupeId = $parElimination[$rang] ?? null;
+                    if ($groupeId === null) {
+                        ++$ventilationsSansIndice;
+                        continue;
+                    }
+
+                    $groupesVus[$groupeId] = true;
+                    $lotVentilation[] = $this->ligneVentilation($groupe, $scrutinId, $groupeId);
+                    ++$ventilations;
+                    ++$ventilationsParElimination;
                 }
             }
 
@@ -232,6 +285,23 @@ class ImportScrutinsCommand extends ImportTricoteusesCommand
         $this->upsert('vote', self::COLONNES_VOTE, $lotVote, ['position', 'cause_position', 'par_delegation', 'scrutin_date', 'updated_at']);
 
         $io->text(sprintf('%d ventilations par groupe, %d votes nominatifs.', $ventilations, $votes));
+
+        if ($ventilationsDeduites > 0) {
+            $io->text(sprintf('Dont %d au groupe déduit de ses votants, faute d\'un organeRef exploitable.', $ventilationsDeduites));
+        }
+
+        if ($ventilationsParElimination > 0) {
+            $io->text(sprintf('Dont %d au groupe retrouvé par élimination, faute du moindre votant à interroger.', $ventilationsParElimination));
+        }
+
+        if ($ventilationsSansIndice > 0) {
+            $io->text(sprintf(
+                'Non reconstituables : %d ventilation%s muette%s que l\'élimination n\'a pas su trancher.',
+                $ventilationsSansIndice,
+                $ventilationsSansIndice > 1 ? 's' : '',
+                $ventilationsSansIndice > 1 ? 's' : '',
+            ));
+        }
 
         // Un import qui écarte des lignes rend l'écart à l'unité : sans ce
         // bilan, une règle fausse ressemble en tout point à une source
@@ -332,6 +402,147 @@ class ImportScrutinsCommand extends ImportTricoteusesCommand
             (int) ($voix['nonVotants'] ?? 0),
             (int) ($voix['nonVotantsVolontaires'] ?? 0),
         ];
+    }
+
+    /**
+     * Retrouve le groupe d'un bloc de ventilation par les députés qu'il liste,
+     * quand l'Assemblée n'en publie pas l'organeRef.
+     *
+     * Elle écrit parfois le code sentinelle `PO0` à la place : quatorze scrutins
+     * de la 17e, dont les douze du 2 décembre 2024 où **tous** les groupes le
+     * portent. Les Tricoteuses recopient le fichier tel quel — c'est leur rôle —
+     * et le legacy n'en traite rien. Le bloc reste pourtant identifiable : ses
+     * votants appartiennent à un seul groupe, qu'on lit dans leur rattachement
+     * principal à la date du scrutin. Sur les quatorze fichiers, les blocs
+     * ressortent unanimes (36/36 RN, 41/41 EPR, 22/22 LFI-NFP…) et leurs
+     * effectifs reproduisent ceux du scrutin voisin du même jour.
+     *
+     * La déduction ne peut rien inventer : elle passe par `fonction_groupe`, donc
+     * ne rend jamais qu'un groupe déjà en base. Et elle exige l'unanimité — un
+     * bloc de ventilation est homogène par construction, si ses députés divergent
+     * c'est notre datation des rattachements qui est en cause, et une ligne
+     * fabriquée fausserait cohésion et proximités bien plus qu'une ligne absente.
+     *
+     * Restent 12 blocs sur 146 dont aucun membre n'a voté : sans votant, plus
+     * rien à interroger. Ceux-là se retrouvent par élimination, une fois tous
+     * les autres placés — voir {@see groupesParElimination()}.
+     *
+     * @param array<string, mixed> $decompteNominatif
+     */
+    private function groupeDeduit(array $decompteNominatif, ?string $date): ?int
+    {
+        if ($date === null) {
+            return null;
+        }
+
+        $acteurs = [];
+        foreach (array_keys(self::POSITIONS) as $cle) {
+            foreach ($decompteNominatif[$cle] ?? [] as $votant) {
+                if (isset($votant['acteurRef'])) {
+                    $acteurs[$votant['acteurRef']] = true;
+                }
+            }
+        }
+
+        if ($acteurs === []) {
+            return null;
+        }
+
+        // `nomin_principale` est indispensable : onze députés de la 17e portent
+        // deux rattachements ouverts, et sans ce filtre le bloc paraît partagé
+        // entre deux groupes — donc non unanime, donc écarté.
+        $groupes = $this->connection->fetchFirstColumn(
+            'SELECT DISTINCT fg.groupe_id
+               FROM fonction_groupe fg
+               JOIN depute d ON d.id = fg.depute_id
+              WHERE d.mp_id IN (?)
+                AND fg.nomin_principale = 1
+                AND (fg.date_debut IS NULL OR fg.date_debut <= ?)
+                AND (fg.date_fin IS NULL OR fg.date_fin >= ?)',
+            [array_keys($acteurs), $date, $date],
+            [\Doctrine\DBAL\ArrayParameterType::STRING, \Doctrine\DBAL\ParameterType::STRING, \Doctrine\DBAL\ParameterType::STRING],
+        );
+
+        return \count($groupes) === 1 ? (int) $groupes[0] : null;
+    }
+
+    /**
+     * Retrouve les blocs qu'aucun votant ne désigne, par élimination.
+     *
+     * Une ventilation liste chaque groupe en activité une fois et une seule.
+     * Les blocs dont personne n'a voté ne portent donc pas moins d'information
+     * que les autres : ils occupent les places que les groupes déjà identifiés
+     * ont laissées libres. Sur les dix scrutins à un seul bloc muet, il ne reste
+     * qu'un groupe disponible et la réponse est forcée, sans même regarder les
+     * effectifs.
+     *
+     * Les scrutins 492 et 493 en ont deux (GDR et NI, tous deux silencieux) : là
+     * l'effectif départage. Notre décompte des rattachements diverge d'une unité
+     * de celui de l'Assemblée à cette date — GDR à 16 chez nous contre 17 dans
+     * le fichier — mais l'écart ne crée aucune ambiguïté, l'autre candidat étant
+     * un groupe de 9. D'où l'exigence ci-dessous : le meilleur appariement doit
+     * être *strictement* meilleur que le suivant, sans quoi on renonce au
+     * scrutin entier plutôt que d'en placer une partie au jugé.
+     *
+     * Deux garde-fous encadrent la méthode. Le nombre de blocs muets doit égaler
+     * exactement celui des groupes libres : sinon notre liste de groupes actifs
+     * ne décrit pas la même Assemblée que le fichier, et l'élimination ne veut
+     * plus rien dire. Et un renoncement est total, jamais partiel — un bloc mal
+     * placé fausse cohésion et proximités bien plus qu'un bloc absent.
+     *
+     * @param list<array<string, mixed>> $orphelins
+     * @param array<int, bool>           $groupesVus groupes déjà pris sur ce scrutin
+     *
+     * @return array<int, int> rang de l'orphelin → id du groupe
+     */
+    private function groupesParElimination(array $orphelins, array $groupesVus, ?string $date): array
+    {
+        if ($date === null) {
+            return [];
+        }
+
+        $actifs = $this->connection->fetchAllKeyValue(
+            'SELECT fg.groupe_id, COUNT(*) AS effectif
+               FROM fonction_groupe fg
+              WHERE fg.nomin_principale = 1
+                AND (fg.date_debut IS NULL OR fg.date_debut <= ?)
+                AND (fg.date_fin IS NULL OR fg.date_fin >= ?)
+              GROUP BY fg.groupe_id',
+            [$date, $date],
+        );
+
+        $libres = array_diff_key(array_map(intval(...), $actifs), $groupesVus);
+        if (\count($libres) !== \count($orphelins)) {
+            return [];
+        }
+
+        // Du bloc le plus fourni au plus modeste : les grands effectifs se
+        // distinguent le mieux, et les placer d'abord réduit d'autant le choix
+        // laissé aux suivants.
+        $rangs = array_keys($orphelins);
+        usort($rangs, static fn (int $a, int $b) => (int) $orphelins[$b]['nombreMembresGroupe'] <=> (int) $orphelins[$a]['nombreMembresGroupe']);
+
+        $paires = [];
+        foreach ($rangs as $rang) {
+            $effectifBloc = (int) ($orphelins[$rang]['nombreMembresGroupe'] ?? 0);
+
+            $ecarts = [];
+            foreach ($libres as $groupeId => $effectif) {
+                $ecarts[$groupeId] = abs($effectif - $effectifBloc);
+            }
+            asort($ecarts);
+
+            $candidats = array_keys($ecarts);
+            $meilleur = $candidats[0];
+            if (isset($candidats[1]) && $ecarts[$meilleur] === $ecarts[$candidats[1]]) {
+                return [];
+            }
+
+            $paires[$rang] = (int) $meilleur;
+            unset($libres[$meilleur]);
+        }
+
+        return $paires;
     }
 
     /**

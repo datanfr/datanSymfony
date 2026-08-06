@@ -3,6 +3,8 @@
 namespace App\Controller;
 
 use App\CouleurGroupe;
+use App\Entity\DossierActeur;
+use App\Groupe\ParticipationGroupe;
 use App\Legislature;
 use App\Referencement\OpenGraph;
 use App\TypeVoteEdito;
@@ -32,6 +34,52 @@ class VoteController extends AbstractController
 
     /** Préfixe d'uid d'un vote du Congrès : « VTCGR5L16V1 ». */
     private const PREFIXE_CONGRES = 'VTCGR';
+
+    /**
+     * Le bloc auteur ne s'affiche qu'à partir de la 15e législature (`Votes::index`
+     * lignes 365 et 370). Avant, ni amendement ni acteur de dossier n'est
+     * renseigné, et le site ne montre rien.
+     */
+    private const PREMIERE_LEGISLATURE_AUTEURS = 15;
+
+    /**
+     * Procédures dont le texte est écrit par des députés : le bloc auteur y
+     * montre les initiateurs du dossier, et non ses rapporteurs. La liste est
+     * celle du legacy, littéraux compris.
+     */
+    private const PROCEDURES_PROPOSITION = [
+        'Proposition de loi ordinaire',
+        'Résolution Article 34-1',
+        'Résolution',
+    ];
+
+    /** Colonnes attendues par `depute/partials/card.html.twig`. */
+    private const CARTE_DEPUTE = 'd.mp_id, d.firstname, d.lastname, d.slug, d.dpt_slug, d.civilite,
+                    d.departement_nom, d.departement_code,
+                    g.libelle AS groupe_libelle, g.libelle_abrev AS groupe_abrev,
+                    ' . CouleurGroupe::SQL . ' AS groupe_couleur,
+                    (SELECT MAX(m.legislature) FROM mandat m WHERE m.depute_id = d.id) AS legislature_last';
+
+    /**
+     * Jointure du groupe d'un député **à la législature du scrutin**, à mettre
+     * en regard de {@see self::CARTE_DEPUTE}. Attend un paramètre `legislature`.
+     *
+     * `depute.groupe_id` ne conviendrait pas : il ne porte que l'appartenance
+     * courante, et vaut donc NULL dès qu'un député a cessé de siéger. David
+     * Amiel, nommé au Gouvernement le 12 novembre 2025, perdrait ainsi son
+     * groupe sur les 116 cartes de rapporteurs du projet de loi de finances,
+     * quand le site continue d'afficher EPR — le legacy lit `deputes_all`, la
+     * composition de la législature. On passe donc par `fonction_groupe`, avec
+     * le rattachement principal le plus récent (cf. CLAUDE.md).
+     */
+    private const GROUPE_A_LA_LEGISLATURE = 'LEFT JOIN groupe g ON g.id = (
+                    SELECT fg.groupe_id
+                    FROM fonction_groupe fg
+                    JOIN groupe gl ON gl.id = fg.groupe_id
+                    WHERE fg.depute_id = d.id AND gl.legislature = :legislature AND fg.nomin_principale = 1
+                    ORDER BY fg.date_fin IS NULL DESC, fg.date_fin DESC, fg.date_debut DESC
+                    LIMIT 1
+                 )';
 
     public function __construct(
         private readonly Connection $connection,
@@ -164,12 +212,9 @@ class VoteController extends AbstractController
             'date_scrutin_fr' => $this->frenchDate($scrutin['date_scrutin'] ?? null),
             'explications' => $explications,
             'explication_en_avant' => $mpEnAvant,
-            // Carte « L'auteur de l'amendement » (Votes::index, lignes 369-382
-            // du legacy) : le député — ou le Gouvernement — auteur de
-            // l'amendement mis aux voix. Les deux autres variantes du bloc du
-            // site (rapporteurs et auteurs d'une proposition de loi) demandent
-            // les initiateurs de dossier, non importés — cf. TODO §1.
-            'auteur_amendement' => $this->auteurAmendement($scrutin),
+            // Bloc auteur sous le vote (Votes::index, lignes 369-397 du legacy),
+            // dans l'une de ses trois variantes selon ce qui était mis aux voix.
+            'auteurs' => $this->auteurs($scrutin),
             'ogp' => $this->ogp($scrutin, $numeroAffiche, $mpEnAvant, $explications),
             'fil_ariane' => [
                 ['nom' => 'Datan', 'url' => $this->generateUrl('home')],
@@ -196,12 +241,64 @@ class VoteController extends AbstractController
     }
 
     /**
+     * Le bloc auteur sous le vote, dans l'une de ses trois variantes.
+     *
+     * Ce qui était mis aux voix commande la variante (`Votes::index`,
+     * lignes 369-397) : un amendement donne son auteur ; à défaut, une
+     * proposition de loi ou une résolution donne les initiateurs du dossier, et
+     * tout autre texte ses rapporteurs. Une proposition dont aucun initiateur
+     * n'est député retombe sur ses rapporteurs — le legacy enchaîne les deux
+     * requêtes, on fait de même.
+     *
+     * Le bloc est réservé aux législatures 15 et suivantes, comme dans le
+     * legacy : avant, aucune de ces trois sources n'est renseignée, et le site
+     * ne l'affiche pas.
+     *
+     * @param array<string, mixed> $scrutin
+     *
+     * @return array<string, mixed>|null
+     */
+    private function auteurs(array $scrutin): ?array
+    {
+        if ((int) $scrutin['legislature'] < self::PREMIERE_LEGISLATURE_AUTEURS) {
+            return null;
+        }
+
+        if (($scrutin['amendement_auteur_ref'] ?? null) !== null) {
+            return $this->auteurAmendement($scrutin);
+        }
+
+        $dossier = $scrutin['dossier_id'] ?? null;
+        if ($dossier === null) {
+            return null;
+        }
+
+        $legislature = (int) $scrutin['legislature'];
+
+        // Sur une proposition ou une résolution, les initiateurs d'abord :
+        // ce sont eux les auteurs du texte. Le Gouvernement n'y figure pas —
+        // seuls les initiateurs de type « acteur » remplissent la carte.
+        if (\in_array($scrutin['dossier_procedure'], self::PROCEDURES_PROPOSITION, true)) {
+            $auteurs = $this->deputesDuDossier((int) $dossier, $legislature, DossierActeur::ROLE_INITIATEUR);
+
+            if ($auteurs !== []) {
+                return ['variante' => 'proposition', 'deputes' => $auteurs];
+            }
+        }
+
+        $rapporteurs = $this->deputesDuDossier((int) $dossier, $legislature, DossierActeur::ROLE_RAPPORTEUR);
+
+        return $rapporteurs === [] ? null : ['variante' => 'rapporteur', 'deputes' => $rapporteurs];
+    }
+
+    /**
      * L'auteur de l'amendement mis aux voix, pour la carte sous le vote.
      *
      * Trois types d'auteur dans la source (`amendement.auteur_type`, cf.
      * `app:import:auteurs-amendements`) : « Député » et « Rapporteur » donnent
-     * la carte du député — son groupe est le rattachement courant, comme sur
-     * toute carte —, « Gouvernement » une carte nue au nom de l'organe.
+     * la carte du député — avec le groupe de la législature du scrutin, cf.
+     * {@see self::GROUPE_A_LA_LEGISLATURE} —, « Gouvernement » une carte nue au
+     * nom de l'organe.
      *
      * Le nom du Gouvernement reprend la composition du site,
      * `ucfirst(mb_strtolower(libelleAbrege))` : « LECORNU II » s'affiche
@@ -214,26 +311,19 @@ class VoteController extends AbstractController
      */
     private function auteurAmendement(array $scrutin): ?array
     {
-        $ref = $scrutin['amendement_auteur_ref'] ?? null;
-        if ($ref === null) {
-            return null;
-        }
+        $ref = $scrutin['amendement_auteur_ref'];
 
         if (\in_array($scrutin['amendement_auteur_type'], ['Député', 'Rapporteur'], true)) {
             $depute = $this->connection->fetchAssociative(
-                'SELECT d.mp_id, d.firstname, d.lastname, d.slug, d.dpt_slug, d.civilite,
-                        d.departement_nom, d.departement_code,
-                        g.libelle AS groupe_libelle, g.libelle_abrev AS groupe_abrev,
-                        ' . CouleurGroupe::SQL . ' AS groupe_couleur,
-                        (SELECT MAX(m.legislature) FROM mandat m WHERE m.depute_id = d.id) AS legislature_last
+                'SELECT ' . self::CARTE_DEPUTE . '
                  FROM depute d
-                 LEFT JOIN groupe g ON g.id = d.groupe_id
+                 ' . self::GROUPE_A_LA_LEGISLATURE . '
                  WHERE d.mp_id = :ref
                  LIMIT 1',
-                ['ref' => $ref],
+                ['ref' => $ref, 'legislature' => (int) $scrutin['legislature']],
             );
 
-            return $depute === false ? null : ['type' => 'depute', 'depute' => $depute];
+            return $depute === false ? null : ['variante' => 'amendement', 'deputes' => [$depute]];
         }
 
         $organe = $this->connection->fetchAssociative(
@@ -248,10 +338,57 @@ class VoteController extends AbstractController
         $nom = mb_strtolower((string) $organe['libelle_abrege']);
 
         return [
-            'type' => 'gouvernement',
-            'nom' => mb_strtoupper(mb_substr($nom, 0, 1)) . mb_substr($nom, 1),
-            'date_debut' => $organe['date_debut'],
+            'variante' => 'amendement',
+            'deputes' => [],
+            'gouvernement' => [
+                'nom' => mb_strtoupper(mb_substr($nom, 0, 1)) . mb_substr($nom, 1),
+                'date_debut' => $organe['date_debut'],
+            ],
         ];
+    }
+
+    /**
+     * Les députés rattachés à un dossier sous un rôle donné — ses initiateurs ou
+     * ses rapporteurs (`get_dossier_mp_authors` / `get_dossier_mp_rapporteurs`).
+     *
+     * Deux filtres viennent du legacy et comptent autant que la requête :
+     *
+     * - l'acteur doit avoir été **député de la législature du scrutin** (jointure
+     *   sur `deputes_all` là-bas, existence d'un mandat ici) : un dossier peut
+     *   être déposé par un sénateur, ou repris d'une législature précédente ;
+     * - les rapporteurs ne sont filtrés sur aucun type. « Rapporteur pour avis »,
+     *   « spécial » et « général » remplissent la même carte — d'où les 116 cartes
+     *   du projet de loi de finances, un rapporteur spécial par mission.
+     *
+     * L'initiateur, lui, peut être un organe — le Gouvernement d'un projet de
+     * loi. La jointure sur `depute` l'écarterait déjà, un `PO…` n'étant jamais
+     * un `mp_id` ; l'exclusion explicite dit l'intention plutôt que de la
+     * laisser reposer sur une collision d'identifiants qui n'arrive pas.
+     *
+     * Le dédoublonnage (`DISTINCT`, `group_by` chez eux) est indispensable : un
+     * même député est rapporteur à plusieurs étapes du même dossier.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function deputesDuDossier(int $dossier, int $legislature, string $role): array
+    {
+        return $this->connection->fetchAllAssociative(
+            'SELECT DISTINCT ' . self::CARTE_DEPUTE . '
+             FROM dossier_acteur da
+             JOIN depute d ON d.mp_id = da.ref
+             ' . self::GROUPE_A_LA_LEGISLATURE . '
+             WHERE da.dossier_id = :dossier
+               AND da.role = :role
+               AND da.type <> :organe
+               AND EXISTS (SELECT 1 FROM mandat m WHERE m.depute_id = d.id AND m.legislature = :legislature)
+             ORDER BY d.lastname',
+            [
+                'dossier' => $dossier,
+                'role' => $role,
+                'organe' => DossierActeur::TYPE_ORGANE,
+                'legislature' => $legislature,
+            ],
+        );
     }
 
     /**
@@ -409,11 +546,19 @@ class VoteController extends AbstractController
             $contre = (int) $row['nombreContres'];
             $abstention = (int) $row['nombreAbstentions'];
             $exprimes = $pour + $contre + $abstention;
-            $effectif = max(1, (int) $row['effectif']);
             $max = max($pour, $contre, $abstention);
 
             $row['positionMajoritaire'] = $row['positionMajoritaire'] ?: 'nv';
-            $row['percentageVotants'] = (int) round($exprimes / $effectif * 100);
+            // Écart assumé avec datan.fr, dont la page de vote retranche les
+            // non-votants du numérateur au lieu du dénominateur : voir
+            // ParticipationGroupe, qui porte la démonstration.
+            $row['percentageVotants'] = ParticipationGroupe::pourcentage(
+                $pour,
+                $contre,
+                $abstention,
+                (int) $row['nonVotants'],
+                (int) $row['effectif'],
+            );
             // Sans vote exprimé, pas de cohésion : cellule vide, comme le site —
             // un « 0.000 » affirmerait un groupe parfaitement désuni là où
             // personne n'a voté.

@@ -1,8 +1,13 @@
 {# Bloc « Son comportement politique » de la fiche (`statistics/_index.php`) :
-   trois cartes précalculées (participation, proximité avec le groupe, proximité
-   avec les groupes politiques). La carte « majorité gouvernementale » du legacy
-   n'est PAS portée : la 17e législature ne déclare plus de majorité présidentielle
-   (cf. CLAUDE.md), et le legacy la masque déjà pour elle.
+   quatre cartes précalculées (participation, proximité avec le groupe, proximité
+   avec la majorité gouvernementale, proximité avec les groupes politiques).
+
+   La carte de la majorité ne paraît que sur les pages des 14e à 16e législatures :
+   la 17e ne déclare plus de majorité présidentielle depuis la dissolution de 2024
+   (cf. CLAUDE.md), `statistique_depute.majorite_score` y est vide et le bloc
+   disparaît — le legacy la masque lui aussi par une condition écrite en toutes
+   lettres dans sa vue. Elle disparaît de même pour un député membre de la
+   majorité, qui se comparerait à son propre groupe.
 
    Les jauges circulaires (`.c100 pNN`, feuille `circle.css`), les barres et les
    info-bulles (`data-toggle="popover"`, initialisées par main.min.js) viennent de
@@ -157,6 +162,66 @@
     </div>
   {% endif %}
 
+  {% if statistiques.majorite %}
+    {% set m = statistiques.majorite %}
+    <div class="card card-statistiques my-4">
+      <div class="card-body">
+        <div class="row">
+          <div class="col-12 d-flex flex-row align-items-center">
+            <div class="icon">
+              {# `elysee.svg`, inlinée comme sur le site. Elle porte ses propres
+                 `fill` : la règle `.card-statistiques .icon path` de main.css ne
+                 colore que les `path`, et cette icône est faite de `rect` et
+                 d'un `polygon` qui resteraient noirs sans eux. #}
+              <svg version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" x="0px" y="0px" width="228px" height="209.5px" viewBox="621.5 0 228 209.5" enable-background="new 621.5 0 228 209.5" xml:space="preserve"><g><path fill="#00B794" d="M675.945,140.941h19.133v32.553h24.558v-57.113c0-8.281,6.855-15.135,15.135-15.135 c8.28,0,15.135,6.854,15.135,15.135v57.113h24.561v-32.553h19.132v32.553h24.841v-58.541h-48.543 c-0.57-15.42-11.138-28.27-25.417-32.268V66.98h-7.995V42.137h7.713V27.858h-7.713V23.29h-1.427h-1.428v43.406h-7.995v15.706 c-14.278,3.998-25.131,16.848-25.7,32.268h-48.546v58.542h24.56L675.945,140.941L675.945,140.941z"/><polygon fill="#00B794" points="651.386,177.494 627.97,177.494 627.97,186.631 841,186.631 841,177.494 818.154,177.494 818.154,177.494 "/><rect x="799.308" y="91.824" fill="#00B794" width="18.847" height="18.276"/><rect x="651.386" y="91.824" fill="#00B794" width="18.848" height="18.276"/><rect x="753.332" y="27.858" fill="#00B794" width="9.139" height="14.278"/></g></svg>
+            </div>
+            <h3 class="ml-3 text-uppercase">
+              Proximité avec la majorité gouvernementale
+              {# Le « (La République en Marche) » de l'info-bulle est écrit en dur
+                 dans la vue du site, qui la sert telle quelle sur les trois
+                 législatures concernées : juste en 15e, périmé en 16e, où la
+                 phrase juste en dessous nomme bien Renaissance. Formulation de la
+                 rédaction, reprise sans la retoucher — pas une coquille de
+                 portage. #}
+              <a tabindex="0" role="button" data-toggle="popover" data-trigger="focus" data-html="true"
+                 aria-label="Aide majorité" class="no-decoration popover_focus" title="Proximité avec la majorité gouvernementale"
+                 data-content="Le <b>taux de proximité avec la majorité gouvernementale</b> représente le pourcentage de fois où un député vote la même chose que le groupe présidentiel (La République en Marche).<br><br>Pour plus d'information, <a href='{{ path('page_statistiques') }}#proximity'>cliquez ici</a>.">
+                <svg width="1em" height="1em" viewBox="0 0 16 16" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" d="M16 8A8 8 0 1 1 0 8a8 8 0 0 1 16 0zM6.57 6.033H5.25C5.22 4.147 6.68 3.5 8.006 3.5c1.397 0 2.673.73 2.673 2.24 0 1.08-.635 1.594-1.244 2.057-.737.559-1.01.768-1.01 1.486v.355H7.117l-.007-.463c-.038-.927.495-1.498 1.168-1.987.59-.444.965-.736.965-1.371 0-.825-.628-1.168-1.314-1.168-.901 0-1.358.603-1.358 1.384zm1.251 6.443c-.584 0-1.009-.394-1.009-.927 0-.552.425-.94 1.01-.94.609 0 1.028.388 1.028.94 0 .533-.42.927-1.029.927z"/></svg>
+              </a>
+            </h3>
+          </div>
+        </div>
+        <div class="row">
+          <div class="col-lg-3 offset-lg-1 mt-2">
+            <div class="d-flex justify-content-center align-items-center">
+              <div class="c100 p{{ m.score }} m-0">
+                <span>{{ m.score }} %</span>
+                <div class="slice"><div class="bar"></div><div class="fill"></div></div>
+              </div>
+            </div>
+          </div>
+          <div class="col-lg-8 infos mt-4 mt-lg-2">
+            <div class="texte ml-md-3 pl-md-3 mt-md-0 mt-3">
+              {# Cette carte-ci ne connaît pas le mode historique : le site
+                 accorde ses verbes sur l'activité du député (« est » pour un
+                 réélu, même sur la page d'une législature close), pas sur la
+                 législature consultée. #}
+              <p>{{ nom_complet }} a voté comme la majorité gouvernementale dans {{ m.score }}% des cas.
+                Les votes de {{ nom_complet }} sont comparés à ceux du groupe politique le plus gros de la majorité
+                (<a href="{{ path('groupe_individual', {legislature: leg_groupes, abrev: m.groupe.libelle_abrev|lower}) }}">{{ m.groupe.libelle|name_group }}</a>).</p>
+              {% if m.edito_all and m.all is not null %}
+                <p>{{ pronom|capitalize }} {{ actif ? 'est' : 'était' }} <b>{{ m.edito_all }}</b> de la majorité gouvernementale que la moyenne des députés non membres de la majorité ({{ m.all }}%).</p>
+              {% endif %}
+              {% if m.edito_group and m.group is not null %}
+                <p>De plus, {{ nom_complet }} {{ actif ? 'est' : 'était' }} <b>{{ m.edito_group }}</b> de la majorité gouvernementale que la moyenne des députés de son groupe politique ({{ m.group }}%).</p>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  {% endif %}
+
   {% if statistiques.accord %}
     {% set a = statistiques.accord %}
     <div class="card card-statistiques bloc-proximity my-4">
@@ -190,6 +255,13 @@
           </div></div>
         {% endif %}
 
+        {# Sur une page de législature close, le site rend ce titre-ci **vide** :
+           `$second_section_title` n'est affecté que dans le `if (isset($proximite))`
+           de `_inter_group_loyalty.php`, et le service ne calcule `$proximite`
+           que pour la législature courante — le `<h4>` sort donc sans texte,
+           au-dessus du graphique qu'il devrait annoncer. Variable oubliée, pas
+           choix éditorial : le titre symétrique (« votait souvent avec : »),
+           lui, est affecté hors de la garde. On l'écrit. #}
         <div class="row mt-5"><div class="col-10 offset-2"><h4>{{ pronom|capitalize }} {{ legislature_stats ? 'votait' : 'vote' }} <b>rarement</b> avec :</h4></div></div>
         {{ include('depute/_barres_accord.html.twig', {groupes: a.derniers}) }}
         {% if a.proximite %}

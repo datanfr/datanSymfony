@@ -208,6 +208,16 @@ donnée à porter.
   (`code_type_vote = 'SPS'`) rapportés à *tous* les solennels tenus pendant sa
   période d'activité. Ne compter que les scrutins où il a une ligne `vote`
   donne faussement 100 %.
+- **Un non-votant n'est pas un votant qui s'abstient.** Dans la ventilation d'un
+  scrutin, `nonVotants` — présidence de séance, membres du Gouvernement, qui
+  n'ont pas le *droit* de voter — désigne un ensemble **disjoint** des pours,
+  contres et abstentions : le `decompteNominatif` les liste à part. Les
+  `nonVotantsVolontaires`, eux, sont bien *inclus* dans les abstentions. D'où la
+  participation d'un groupe : `(pours + contres + abstentions) / (membres −
+  nonVotants)` — on les retire du **dénominateur**, faute d'avoir pu voter, et
+  jamais du numérateur, où ils n'ont jamais été comptés. Le legacy se trompe de
+  côté sur sa seule page de vote et affiche des participations trop basses,
+  voire nulles ; cf. `App\Groupe\ParticipationGroupe`.
 - **`date_fin` d'un député n'est pas fiable** pour savoir s'il siège : se fonder
   sur l'existence d'un mandat sans date de fin.
 - **Les votes nominatifs couvrent les législatures 14 à 17** (2,46 M lignes)

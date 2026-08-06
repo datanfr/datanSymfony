@@ -32,6 +32,23 @@ final class Catalogue
                 self::BASE . 'assemblee-nettoye/Dossiers_Legislatifs_XVII_nettoye.git',
                 'Dossiers législatifs de la 17e législature',
             ),
+            // Les dossiers des législatures closes, pour les seuls initiateurs
+            // et rapporteurs (`app:import:dossiers-acteurs`) : le dépôt de la
+            // 17e ne porte que quelques dizaines de dossiers antérieurs, et sans
+            // ceux-ci le bloc auteur d'une page de vote de 2017-2024 reste vide
+            // là où datan.fr l'affiche. Figés, donc hors moisson nocturne.
+            'dossiers-xv' => new Depot(
+                'dossiers-xv',
+                self::BASE . 'assemblee-nettoye/Dossiers_Legislatifs_XV_nettoye.git',
+                'Dossiers législatifs de la 15e législature (2017-2022), close',
+                quotidien: false,
+            ),
+            'dossiers-xvi' => new Depot(
+                'dossiers-xvi',
+                self::BASE . 'assemblee-nettoye/Dossiers_Legislatifs_XVI_nettoye.git',
+                'Dossiers législatifs de la 16e législature (2022-2024), close',
+                quotidien: false,
+            ),
             'scrutins' => new Depot(
                 'scrutins',
                 self::BASE . 'assemblee-nettoye/Scrutins_XVII_nettoye.git',

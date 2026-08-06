@@ -3,6 +3,7 @@
 namespace App\Command;
 
 use App\Legislature;
+use Doctrine\DBAL\ArrayParameterType;
 use Doctrine\DBAL\Connection;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
@@ -14,10 +15,12 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 /**
  * Précalcule les statistiques de comportement des députés qui alimentent les
  * cartes « Son comportement politique » de la fiche : participation aux scrutins
- * solennels, proximité (loyauté) avec le groupe, et proximité avec chaque groupe.
+ * solennels, proximité (loyauté) avec le groupe, proximité avec la majorité
+ * gouvernementale, et proximité avec chaque groupe.
  *
  * L'application d'origine tient ces tables (`class_participation_solennels`,
- * `class_loyaute`, `deputes_accord_cleaned`) à jour chaque nuit dans `daily.php`,
+ * `class_loyaute`, `class_majorite`, `deputes_accord_cleaned`) à jour chaque nuit
+ * dans `daily.php`,
  * parce que ces cartes comparent le député à la MOYENNE de tous les députés et de
  * son groupe — moyennes qu'on ne peut pas rejouer sur 1,27 M de votes à chaque
  * affichage. On fait de même : cette commande remplit `statistique_depute` et
@@ -46,6 +49,9 @@ class CalculStatistiquesDeputesCommand extends Command
 
     /** Position d'un député qui n'avait pas le droit de voter : ce n'est pas une absence. */
     private const NON_VOTANT = 'nonVotant';
+
+    /** Qualification d'un groupe soutenant le Gouvernement (`organes.positionPolitique`). */
+    private const MAJORITAIRE = 'Majoritaire';
 
     /** Borne haute conventionnelle d'un rattachement ou d'un mandat encore ouvert. */
     private const SANS_FIN = '9999-12-31';
@@ -77,6 +83,9 @@ class CalculStatistiquesDeputesCommand extends Command
                                    WHERE n = 1)";
 
     private const LOT = 500;
+
+    /** @var array<int, list<int>> Groupes majoritaires par législature, résolus une fois. */
+    private array $majoritaires = [];
 
     public function __construct(private readonly Connection $connection)
     {
@@ -112,14 +121,20 @@ class CalculStatistiquesDeputesCommand extends Command
             ['leg' => $legislature],
         );
 
-        $io->text('Participation et loyauté…');
+        $io->text('Participation, loyauté et proximité avec la majorité…');
         $lignes = $this->statistiquesDeputes($legislature);
         $this->inserer(
-            'statistique_depute (depute_id, legislature, participation_score, participation_votes, loyaute_score, loyaute_votes, actif, groupe_id)',
-            '(?, ?, ?, ?, ?, ?, ?, ?)',
+            'statistique_depute (depute_id, legislature, participation_score, participation_votes, loyaute_score, loyaute_votes, majorite_score, majorite_votes, actif, groupe_id)',
+            '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
             $lignes,
         );
         $io->text(sprintf('  %d députés.', \count($lignes)));
+
+        if ($this->groupesMajoritaires($legislature) === []) {
+            // Dit à voix haute, sinon une colonne entièrement nulle passe pour
+            // un import raté : c'est la 17e qui n'a pas de majorité déclarée.
+            $io->text('  Aucun groupe majoritaire déclaré : proximité avec la majorité laissée vide.');
+        }
 
         $io->text('Proximité par groupe (agrégation sur tous les votes)…');
         $accords = $this->accordsParGroupe($legislature);
@@ -149,6 +164,10 @@ class CalculStatistiquesDeputesCommand extends Command
      *   absences ;
      * - la loyauté se mesure contre le groupe où le député siégeait, lu dans
      *   `fonction_groupe` et borné aux dates de ce rattachement.
+     *
+     * S'y ajoute la proximité avec la majorité gouvernementale (`class_majorite`,
+     * daily.php:2534), qui ne dépend d'aucun rattachement : c'est le taux d'accord
+     * du député avec le groupe majoritaire de la législature.
      *
      * @return list<list<int|null>>
      */
@@ -203,6 +222,8 @@ class CalculStatistiquesDeputesCommand extends Command
             $loyauteParDepute[(int) $l['depute_id']] = $l;
         }
 
+        $majoriteParDepute = $this->proximiteMajorite($legislature);
+
         $actifs = array_flip(array_map('intval', $this->connection->fetchFirstColumn(
             'SELECT DISTINCT depute_id FROM mandat WHERE legislature = :leg AND date_fin IS NULL',
             ['leg' => $legislature],
@@ -234,6 +255,8 @@ class CalculStatistiquesDeputesCommand extends Command
                     : null;
             }
 
+            $majorite = $majoriteParDepute[$deputeId] ?? ['score' => null, 'votes' => 0];
+
             $lignes[] = [
                 $deputeId,
                 $legislature,
@@ -241,12 +264,90 @@ class CalculStatistiquesDeputesCommand extends Command
                 $total,
                 $loyauteScore,
                 $loyauteTotal,
+                $majorite['score'],
+                $majorite['votes'],
                 isset($actifs[$deputeId]) ? 1 : 0,
                 isset($rattachements[$deputeId]) ? (int) $rattachements[$deputeId] : null,
             ];
         }
 
         return $lignes;
+    }
+
+    /**
+     * Proximité de chaque député avec la majorité gouvernementale : part de ses
+     * votes exprimés où il rejoint la position majoritaire du groupe majoritaire
+     * (`class_majorite`, sur le `scoreGvt` de `votes_scores`, daily.php:1931).
+     *
+     * Deux traits de ce calcul le distinguent de la proximité par groupe, et il
+     * faut les garder pour retomber sur les chiffres du site :
+     *
+     * - le dénominateur est l'ensemble des votes exprimés du député sous la
+     *   législature, y compris les scrutins où la majorité n'a pas de position.
+     *   Le `CASE … WHEN vote = gvtPosition THEN 1 ELSE 0` de l'origine bascule
+     *   sur son `ELSE` quand la comparaison vaut NULL : un scrutin sans position
+     *   de la majorité compte comme un désaccord, pas comme une non-comparaison.
+     *   La jointure reste donc un `LEFT JOIN`, et `SUM(…)` — qui ignore les NULL
+     *   — les compte à zéro sans les retirer du `COUNT(*)`. (En pratique, chacune
+     *   des trois législatures concernées a une ventilation de sa majorité sur
+     *   chacun de ses scrutins ; la garde vaut pour ce qui viendra.)
+     * - la majorité n'est pas un groupe fixe sur toute la législature : la 14e en
+     *   déclare deux qui se succèdent (SRC jusqu'au 24 mai 2016, puis SER). D'où
+     *   le `IN` sur tous les groupes majoritaires de la législature, comme le
+     *   `gvt.organeRef IN (…)` de l'origine — leurs mandats ne se chevauchant
+     *   pas, chaque scrutin n'en trouve qu'un.
+     *
+     * @return array<int, array{score: int|null, votes: int}>
+     */
+    private function proximiteMajorite(int $legislature): array
+    {
+        $majoritaires = $this->groupesMajoritaires($legislature);
+
+        if ($majoritaires === []) {
+            return [];
+        }
+
+        $lignes = $this->connection->fetchAllAssociative(
+            "SELECT v.depute_id,
+                    COUNT(*) AS total,
+                    SUM(v.position = vg.position_majoritaire) AS conformes
+             FROM vote v
+             JOIN scrutin s ON s.id = v.scrutin_id AND s.legislature = :leg
+             LEFT JOIN vote_groupe vg ON vg.scrutin_id = v.scrutin_id AND vg.groupe_id IN (:majoritaires)
+             WHERE v.vote_type = :officiel AND v.position IN ('pour','contre','abstention')
+             GROUP BY v.depute_id",
+            ['leg' => $legislature, 'officiel' => self::OFFICIEL, 'majoritaires' => $majoritaires],
+            ['majoritaires' => ArrayParameterType::INTEGER],
+        );
+
+        $parDepute = [];
+        foreach ($lignes as $ligne) {
+            $total = (int) $ligne['total'];
+            $parDepute[(int) $ligne['depute_id']] = [
+                'score' => $total > 0 ? (int) round((int) $ligne['conformes'] / $total * 100) : null,
+                'votes' => $total,
+            ];
+        }
+
+        return $parDepute;
+    }
+
+    /**
+     * Groupes que la législature déclare majoritaires (`positionPolitique`).
+     *
+     * Vide pour la 17e : depuis la dissolution de 2024, l'Assemblée ne publie
+     * plus cette qualification, et rien ne la remplace — surtout pas un groupe
+     * choisi au jugé (cf. CLAUDE.md). La carte de la fiche disparaît alors,
+     * comme sur datan.fr, qui l'écarte explicitement pour cette législature.
+     *
+     * @return list<int>
+     */
+    private function groupesMajoritaires(int $legislature): array
+    {
+        return $this->majoritaires[$legislature] ??= array_map('intval', $this->connection->fetchFirstColumn(
+            'SELECT id FROM groupe WHERE legislature = :leg AND position_politique = :majoritaire',
+            ['leg' => $legislature, 'majoritaire' => self::MAJORITAIRE],
+        ));
     }
 
     /**

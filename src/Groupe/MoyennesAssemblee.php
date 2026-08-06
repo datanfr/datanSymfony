@@ -105,8 +105,7 @@ final class MoyennesAssemblee
             'SELECT AVG(g.cohesion) AS cohesion, AVG(g.participation) AS participation
              FROM (
                  SELECT AVG(' . self::COHESION_SQL . ') AS cohesion,
-                        AVG((vg.nombre_pours + vg.nombre_contres + vg.nombre_abstentions)
-                            / NULLIF(vg.nombre_membres_groupe, 0)) * 100 AS participation
+                        AVG(' . ParticipationGroupe::SQL . ') * 100 AS participation
                  FROM vote_groupe vg
                  JOIN groupe gr ON gr.id = vg.groupe_id
                  WHERE gr.legislature = :legislature

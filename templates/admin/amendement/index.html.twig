@@ -83,9 +83,19 @@
               <td class="text-right">{{ ligne.votants ?? '—' }}</td>
               <td class="text-right">{{ ligne.disparite is not null ? ligne.disparite ~ ' %' : '—' }}</td>
               <td class="text-right">{{ ligne.interet is not null ? ligne.interet ~ ' %' : '—' }}</td>
-              {# Note de simplicité : pas de colonne dans notre schéma (voir TODO §4),
-                 affichée vide plutôt qu'inventée. #}
-              <td class="text-center text-muted" title="Note de simplicité non disponible dans ce schéma">—</td>
+              {# Note de simplicité, comme dans l'application d'origine : badge « n/5 »
+                 coloré aux mêmes seuils (4-5 vert, 3 orange, 1-2 rouge). Son
+                 infobulle y répétait « n/5 » ; elle rappelle ici l'échelle, que
+                 le chiffre seul ne dit pas. Vide tant que la génération IA n'a
+                 pas tourné sur l'amendement. #}
+              {% if ligne.simplicite_ia %}
+                <td class="text-center">
+                  <span class="badge badge-{{ ligne.simplicite_ia >= 4 ? 'success' : (ligne.simplicite_ia >= 3 ? 'warning' : 'danger') }}"
+                        title="1 = très technique, 5 = très accessible">{{ ligne.simplicite_ia }}/5</span>
+                </td>
+              {% else %}
+                <td class="text-center text-muted" title="Résumé pas encore généré, ou repris de la production sans sa note">—</td>
+              {% endif %}
               <td class="text-center">
                 {% if ligne.amendement_id %}
                   <input type="checkbox" class="case-relu" data-amendement="{{ ligne.amendement_id }}" {{ ligne.relu ? 'checked' }}>

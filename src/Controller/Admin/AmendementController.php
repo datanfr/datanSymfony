@@ -21,18 +21,19 @@ use Symfony\Component\Security\Http\Attribute\IsGranted;
  * Un vote relu peut alors être décrypté — d'où le bouton « Décrypter », qui
  * ouvre l'écran des décryptages pré-rempli sur le scrutin.
  *
- * Deux écarts de schéma assumés avec l'application d'origine, où ce socle IA
- * vivait dans une table `amendements_ia` **clée sur le vote** (`legislature`,
- * `voteNumero`) :
+ * Écart de schéma assumé avec l'application d'origine, où ce socle IA vivait
+ * dans une table `amendements_ia` **clée sur le vote** (`legislature`,
+ * `voteNumero`) : chez nous, le résumé, sa note de simplicité et son drapeau de
+ * relecture vivent sur l'amendement lui-même ({@see \App\Entity\Amendement} :
+ * `resume_ia`, `titre_ia`, `simplicite_ia`, `resume_relu`), qu'un scrutin
+ * désigne par sa clé `amendement_id`. Le « relu » du legacy
+ * (`amendements_ia.reviewed`, basculé par un endpoint AJAX) devient donc
+ * `amendement.resume_relu`.
  *
- * - Chez nous, le résumé et son drapeau de relecture vivent sur l'amendement
- *   lui-même ({@see \App\Entity\Amendement} : `resume_ia`, `titre_ia`,
- *   `resume_relu`), qu'un scrutin désigne par sa clé `amendement_id`. Le
- *   « relu » du legacy (`amendements_ia.reviewed`, basculé par un endpoint AJAX)
- *   devient donc `amendement.resume_relu`.
- * - La note de simplicité (`amendements_ia.simplicite_ia`, rendue en étoiles)
- *   n'a pas encore de colonne dans notre schéma : la colonne est affichée vide
- *   (« — ») plutôt qu'inventée. Voir TODO.md §4.
+ * La note de simplicité vient du même appel que le résumé
+ * ({@see \App\Command\GenererResumesAmendementsCommand}) : un entier de 1 (très
+ * technique) à 5 (très accessible). Elle reste vide (« — ») sur les résumés
+ * repris de la production, dont l'export TSV ne la porte pas.
  *
  * Accès : rédacteur **et** administrateur, comme le `security_only_team()` qui
  * garde tout le contrôleur `Admin` du legacy — aucune restriction plus fine sur
@@ -93,6 +94,7 @@ class AmendementController extends AbstractController
                     a.id AS amendement_id,
                     a.titre_ia,
                     a.resume_ia,
+                    a.simplicite_ia,
                     COALESCE(a.resume_relu, 0) AS relu,
                     -- Écart de position adopté/rejeté, en points (daily.php) ; NULLIF
                     -- garde d'une division par zéro sur un scrutin sans votant.

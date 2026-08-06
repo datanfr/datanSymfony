@@ -7,9 +7,10 @@ use Doctrine\ORM\Mapping as ORM;
 
 /**
  * Statistiques précalculées d'un député pour une législature : participation aux
- * scrutins solennels et proximité (loyauté) avec son groupe. Alimente les cartes
- * « Son comportement politique » de la fiche (`class_participation_solennels` et
- * `class_loyaute` de l'application d'origine).
+ * scrutins solennels, proximité (loyauté) avec son groupe et proximité avec la
+ * majorité gouvernementale. Alimente les cartes « Son comportement politique » de
+ * la fiche (`class_participation_solennels`, `class_loyaute` et `class_majorite`
+ * de l'application d'origine).
  *
  * **Précalcul, comme le legacy** (`daily.php`) : ces cartes comparent le député à
  * la moyenne de tous les députés et à celle de son groupe. Recalculer ces
@@ -52,6 +53,18 @@ class StatistiqueDepute
 
     #[ORM\Column]
     private int $loyauteVotes = 0;
+
+    /**
+     * Taux de proximité avec la majorité gouvernementale, en % (`class_majorite`).
+     * Null quand la législature ne déclare aucun groupe majoritaire : c'est le cas
+     * de la 17e depuis la dissolution de 2024 (cf. CLAUDE.md), et sa fiche n'a donc
+     * pas cette carte — jamais un groupe choisi au jugé pour la remplacer.
+     */
+    #[ORM\Column(type: Types::SMALLINT, nullable: true)]
+    private ?int $majoriteScore = null;
+
+    #[ORM\Column]
+    private int $majoriteVotes = 0;
 
     /** 1 si le député siège encore (mandat sans date de fin), 0 sinon. */
     #[ORM\Column(type: Types::SMALLINT)]
@@ -139,6 +152,30 @@ class StatistiqueDepute
     public function setLoyauteVotes(int $loyauteVotes): static
     {
         $this->loyauteVotes = $loyauteVotes;
+
+        return $this;
+    }
+
+    public function getMajoriteScore(): ?int
+    {
+        return $this->majoriteScore;
+    }
+
+    public function setMajoriteScore(?int $majoriteScore): static
+    {
+        $this->majoriteScore = $majoriteScore;
+
+        return $this;
+    }
+
+    public function getMajoriteVotes(): int
+    {
+        return $this->majoriteVotes;
+    }
+
+    public function setMajoriteVotes(int $majoriteVotes): static
+    {
+        $this->majoriteVotes = $majoriteVotes;
 
         return $this;
     }
