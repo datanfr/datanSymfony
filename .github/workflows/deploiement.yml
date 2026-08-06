@@ -1,0 +1,81 @@
+name: Déploiement
+
+# Déploiement par répertoires de version : chaque mise en ligne écrit dans
+# `releases/<sha>` puis bascule un lien symbolique. Ce n'est pas une coquetterie
+# — le sync de 6 h tourne parfois encore, et vider `var/cache/prod` sous une
+# commande en cours la fait échouer sans message exploitable (CLAUDE.md). Avec
+# une version par déploiement, la commande en vol garde son propre cache et
+# personne ne se marche dessus.
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+    inputs:
+      cible:
+        description: Environnement visé
+        type: choice
+        options: [preproduction, production]
+        default: preproduction
+
+concurrency:
+  group: deploiement-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  deployer:
+    name: Mettre en ligne
+    runs-on: ubuntu-latest
+    # Tant que la production n'est pas ouverte, un push ne va qu'en
+    # préproduction ; la production se déclenche à la main.
+    environment: ${{ inputs.cible || 'preproduction' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: PHP 8.3
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: ctype, iconv, intl, mysqli, mbstring, xml, zip
+          coverage: none
+          tools: composer:v2
+
+      # --no-dev : ni profiler, ni maker, ni PHPUnit en ligne. --optimize-autoloader
+      # parce que le chargement de classes est sur le chemin critique de chaque page.
+      - name: Dépendances de production
+        run: composer install --no-interaction --no-progress --prefer-dist --no-dev --optimize-autoloader
+        env:
+          APP_ENV: prod
+
+      - name: Clé SSH
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "${{ secrets.SSH_CLE_PRIVEE }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "${{ secrets.SSH_HOTE_CLE_PUBLIQUE }}" > ~/.ssh/known_hosts
+
+      # Le code part sans son historique, sans son cache et sans les clones
+      # Tricoteuses (1,8 Go) : ceux-là vivent dans le répertoire partagé et
+      # survivent aux déploiements.
+      - name: Transfert
+        run: |
+          rsync -az --delete \
+            --exclude '.git' \
+            --exclude '.github' \
+            --exclude 'var' \
+            --exclude 'tests' \
+            --exclude 'compose*.yaml' \
+            -e "ssh -i ~/.ssh/id_ed25519 -p ${{ vars.SSH_PORT || 22 }}" \
+            ./ "${{ secrets.SSH_UTILISATEUR }}@${{ secrets.SSH_HOTE }}:${{ vars.CHEMIN_BASE }}/releases/${{ github.sha }}/"
+
+      - name: Bascule
+        run: |
+          ssh -i ~/.ssh/id_ed25519 -p "${{ vars.SSH_PORT || 22 }}" \
+            "${{ secrets.SSH_UTILISATEUR }}@${{ secrets.SSH_HOTE }}" \
+            "CHEMIN_BASE='${{ vars.CHEMIN_BASE }}' sh ${{ vars.CHEMIN_BASE }}/releases/${{ github.sha }}/bin/deployer.sh '${{ github.sha }}'"
+
+      - name: Vérifier que le site répond
+        run: |
+          code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 "${{ vars.URL_PUBLIQUE }}")
+          echo "HTTP $code sur ${{ vars.URL_PUBLIQUE }}"
+          test "$code" = "200"
