@@ -63,7 +63,12 @@ class StatistiqueDepute
     #[ORM\Column(type: Types::SMALLINT, nullable: true)]
     private ?int $majoriteScore = null;
 
-    #[ORM\Column]
+    // `options: ['default' => 0]` n'est pas décoratif : la migration qui a créé
+    // la colonne écrit `INT DEFAULT 0 NOT NULL`, et un `= 0` PHP n'est qu'un
+    // défaut d'objet, invisible du schéma. Sans cette option, chaque
+    // `doctrine:schema:validate` déclarait la base désynchronisée et proposait
+    // de retirer le DEFAULT — un diff fantôme, sur une colonne pourtant juste.
+    #[ORM\Column(options: ['default' => 0])]
     private int $majoriteVotes = 0;
 
     /** 1 si le député siège encore (mandat sans date de fin), 0 sinon. */
