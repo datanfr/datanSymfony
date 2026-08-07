@@ -27,7 +27,7 @@ final class Version20260729090000 extends AbstractMigration
     public function up(Schema $schema): void
     {
         $this->addSql('ALTER TABLE depute ADD date_naissance DATE DEFAULT NULL, ADD ville_naissance VARCHAR(255) DEFAULT NULL');
-        $this->addSql('CREATE TABLE profession_foi (id INT AUTO_INCREMENT NOT NULL, mp_id VARCHAR(32) NOT NULL, election_id INT NOT NULL, fichier VARCHAR(255) NOT NULL, tour SMALLINT NOT NULL, UNIQUE INDEX uniq_profession_foi (mp_id, election_id, tour), INDEX idx_profession_foi_mp (mp_id), PRIMARY KEY(id)) DEFAULT CHARACTER SET utf8mb4');
+        $this->addSql('CREATE TABLE profession_foi (id INT AUTO_INCREMENT NOT NULL, mp_id VARCHAR(32) NOT NULL, election_id INT NOT NULL, fichier VARCHAR(255) NOT NULL, tour SMALLINT NOT NULL, UNIQUE INDEX uniq_profession_foi (mp_id, election_id, tour), INDEX idx_profession_foi_mp (mp_id), PRIMARY KEY(id)) DEFAULT CHARACTER SET utf8mb4 COLLATE `utf8mb4_unicode_ci`');
     }
 
     public function down(Schema $schema): void

@@ -38,10 +38,33 @@ final class Version20260722143025 extends AbstractMigration
         $this->addSql(<<<'SQL'
             ALTER TABLE commune_circonscription ADD CONSTRAINT FK_9FD8F66B131A4F72 FOREIGN KEY (commune_id) REFERENCES commune (id) ON DELETE CASCADE
         SQL);
+
+        // Repris de Version20260722101210, dont l'horodatage est antérieur à
+        // cette migration alors que ces instructions supposent `commune` créée.
+        // Sur une base vierge, elles y échouaient (errno 150). Voir le docbloc
+        // de cette migration-là.
+        $this->addSql(<<<'SQL'
+            ALTER TABLE commune ADD population2012 INT DEFAULT NULL, ADD code_postal VARCHAR(40) DEFAULT NULL
+        SQL);
+        $this->addSql(<<<'SQL'
+            ALTER TABLE commune_adjacente ADD CONSTRAINT FK_C1777978131A4F72 FOREIGN KEY (commune_id) REFERENCES commune (id) ON DELETE CASCADE
+        SQL);
+        $this->addSql(<<<'SQL'
+            ALTER TABLE commune_adjacente ADD CONSTRAINT FK_C1777978894CF5C0 FOREIGN KEY (adjacente_id) REFERENCES commune (id) ON DELETE CASCADE
+        SQL);
     }
 
     public function down(Schema $schema): void
     {
+        $this->addSql(<<<'SQL'
+            ALTER TABLE commune_adjacente DROP FOREIGN KEY FK_C1777978131A4F72
+        SQL);
+        $this->addSql(<<<'SQL'
+            ALTER TABLE commune_adjacente DROP FOREIGN KEY FK_C1777978894CF5C0
+        SQL);
+        $this->addSql(<<<'SQL'
+            ALTER TABLE commune DROP population2012, DROP code_postal
+        SQL);
         $this->addSql(<<<'SQL'
             ALTER TABLE commune_circonscription DROP FOREIGN KEY FK_9FD8F66B131A4F72
         SQL);
