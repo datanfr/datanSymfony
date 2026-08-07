@@ -21,6 +21,30 @@
 ###< symfony/phpunit-bridge ###
 
 ###> symfony/asset-mapper ###
-/public/assets/
+# `/public/assets/` tout court était trop large. AssetMapper y écrit bien sa
+# sortie compilée — qui ne se commite pas —, mais ce même dossier porte aussi
+# les 42 Mo d'assets statiques hérités du site : images, feuilles de style,
+# scripts, polices. Ceux-là DOIVENT partir en production, et le déploiement se
+# faisant par `git pull`, rien d'autre ne les y acheminerait. Leur absence fait
+# tomber la page d'accueil en 500 (`source('@public/assets/imgs/france_map/
+# map.svg')` introuvable) et laisse toutes les autres sans style.
+#
+# Les deux ensembles sont disjoints : AssetMapper produit `app-<hash>.js`,
+# `styles/`, `controllers/`, `vendor/`, `@symfony/`, `manifest.json` et
+# `importmap.json` ; le legacy occupe les sept dossiers ré-autorisés ci-dessous.
+/public/assets/*
+!/public/assets/css/
+!/public/assets/data_elections/
+!/public/assets/documents/
+!/public/assets/imgs/
+!/public/assets/js/
+!/public/assets/webfont_open_supp/
+!/public/assets/webfonts_supp/
+# Exception dans l'exception : les photos de députés sont **regénérées** par
+# `app:import:photos` (cf. ImportPhotosCommand::DOSSIER_PUBLIC), donc par le sync
+# quotidien. Les committer alourdirait le dépôt de 5,4 Mo pour rien, et les
+# figerait au jour du commit.
+/public/assets/imgs/deputes/
+
 /assets/vendor/
 ###< symfony/asset-mapper ###

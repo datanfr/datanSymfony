@@ -15,17 +15,17 @@ le jour J. Ce fichier-ci dit comment monter la machine et y poser le code.
 Trois choses bloquent aujourd'hui un déploiement, et aucune ne se répare depuis
 le serveur.
 
-- [ ] **`APP_SECRET` est vide** dans `.env`. Il signe les cookies de session et
+- [x] **`APP_SECRET` est vide** dans `.env`. Il signe les cookies de session et
       les jetons CSRF : vide, la connexion et les formulaires de la rédaction ne
       tiennent pas. Il se pose dans `.env.local` **sur le serveur**, jamais dans
       `.env` qui est suivi par Git.
       ```bash
       php -r 'echo bin2hex(random_bytes(32)), "\n";'
       ```
-- [ ] **Deux migrations ne sont pas commitées** — `Version20260805090000.php` et
+- [x] **Deux migrations ne sont pas commitées** — `Version20260805090000.php` et
       `Version20260805120000.php`. Elles sont appliquées sur la base de
       développement, donc invisibles ici, mais le serveur ne les aura pas.
-- [ ] **`compose.yaml` décrit un PostgreSQL** hérité du squelette Symfony, alors
+- [x] **`compose.yaml` décrit un PostgreSQL** hérité du squelette Symfony, alors
       que le projet tourne sur MariaDB. Il ne sert à rien en production, mais il
       ment à quiconque le lit — à supprimer ou à réécrire.
 
@@ -55,14 +55,23 @@ inconfortables.
 ```bash
 sudo apt update && sudo apt install -y \
   nginx git curl unzip \
-  php8.3-fpm php8.3-cli php8.3-mysqli php8.3-intl php8.3-mbstring \
+  php8.3-fpm php8.3-cli php8.3-mysql php8.3-intl php8.3-mbstring \
   php8.3-xml php8.3-curl php8.3-zip php8.3-opcache
 ```
 
-Deux pièges :
+Trois pièges :
 
-- **`php8.3-mysqli`, pas `pdo_mysql`.** Le DSN du projet est `mysqli://`. Avec
-  la seule extension PDO, la connexion échoue au premier appel.
+- **`php8.3-mysql` fournit `mysqli`** (et `pdo_mysql`) ; il n'existe pas de
+  paquet `php8.3-mysqli`. Le DSN du projet est `mysqli://` : sans cette
+  extension, la connexion échoue au premier appel.
+- **`php8.3-intl` n'est pas optionnelle**, alors que `composer.json` ne la
+  déclare pas. `DeputeController`, `ElectionController` et
+  `ResultatCirconscriptionRepository` construisent des `IntlDateFormatter` en
+  `fr_FR`, `GroupeController` un `Collator('fr_FR')`, et `ImportActeursCommand`
+  un `Transliterator`. Le polyfill `symfony/polyfill-intl-icu` **lève une
+  exception dès que la locale n'est pas « en »**, et ne couvre pas
+  `Transliterator` du tout : sans l'extension, les fiches de députés, les pages
+  d'élection et l'import des acteurs tombent tous.
 - **`git` est une dépendance d'exécution**, pas seulement de développement :
   `Moissonneur.php` lance le binaire pour moissonner les Tricoteuses, qui ne
   publient pas d'API HTTP.
@@ -109,33 +118,90 @@ les 1,8 Go de clones Tricoteuses.
 table `doctrine_migration_versions` parte cohérente avec le schéma — sinon le
 serveur rejouera des migrations déjà présentes et échouera.
 
+Le client MariaDB n'est **pas** dans le `PATH` du poste — c'est celui de MySQL
+8.0 qui y est, et son `mysqldump` produit un fichier que MariaDB relit mal.
+Chemin complet obligatoire.
+
 ```powershell
-mariadb-dump -h 127.0.0.1 -P 3307 -u datan -pdatan `
+$mdb  = 'C:\Program Files\MariaDB 11.7\bin\mariadb-dump.exe'
+$gzip = 'C:\Program Files\Git\usr\bin\gzip.exe'
+$date = Get-Date -Format 'yyyyMMdd'
+$dst  = "$env:USERPROFILE\Downloads"
+
+& $mdb -h 127.0.0.1 -P 3307 -u datan -pdatan `
   --single-transaction --quick --default-character-set=utf8mb4 `
-  --routines --events datan_symfony | gzip > datan_symfony.sql.gz
+  --ignore-table=datan_symfony.messenger_messages `
+  --result-file="$dst\datan_$date.sql" datan_symfony
+if ($LASTEXITCODE -ne 0) { throw "dump principal en échec ($LASTEXITCODE)" }
+
+& $mdb -h 127.0.0.1 -P 3307 -u datan -pdatan `
+  --default-character-set=utf8mb4 --no-data `
+  --result-file="$dst\datan_${date}_messenger.sql" datan_symfony messenger_messages
+if ($LASTEXITCODE -ne 0) { throw "dump messenger en échec ($LASTEXITCODE)" }
+
+& $gzip -9 -f "$dst\datan_$date.sql" "$dst\datan_${date}_messenger.sql"
 ```
 
-`--single-transaction` évite de verrouiller les tables, `--quick` de charger
-844 Mo de votes en mémoire.
+Quatre choix à ne pas défaire :
+
+- **`--result-file=` et non `>`.** La redirection PowerShell fait transiter le
+  dump par sa couche d'encodage de texte ; `mariadb-dump` écrit ici lui-même, en
+  octets bruts.
+- **`--ignore-table` sur `messenger_messages`** : la file d'attente des courriels
+  ne se transporte pas. Sa **structure** part dans le second fichier — le DSN
+  porte `auto_setup=0`, donc Symfony ne la créera pas seul et le worker
+  tomberait. Alternative plus propre : ne pas faire ce second dump et lancer
+  `php bin/console messenger:setup-transports` sur le serveur.
+- **`--single-transaction`** : dump cohérent sans verrouiller les tables.
+- **`--quick`** : sinon `vote` (844 Mo) est chargée en mémoire d'un bloc.
+
+Compter ~1 Go brut, ~116 Mo compressé.
 
 ### b. Transfert et restauration
 
+`scp` et `ssh` sont natifs sous Windows, pas besoin de Git Bash :
+
+```powershell
+scp "$dst\datan_$date.sql.gz" "$dst\datan_${date}_messenger.sql.gz" deploy@datan.remikel.fr:/tmp/
+```
+
+Puis, sur le serveur, **dans un `screen`** : l'import dure 10 à 20 minutes et une
+coupure SSH le tuerait au milieu d'une table.
+
 ```bash
-scp datan_symfony.sql.gz deploy@datan.remikel.fr:/tmp/
-ssh deploy@datan.remikel.fr
-zcat /tmp/datan_symfony.sql.gz | mariadb -u datan -p datan_symfony
-rm /tmp/datan_symfony.sql.gz
+screen -S import
+zcat /tmp/datan_*_messenger.sql.gz | mariadb -u datan -p datan_symfony
+zcat /tmp/datan_2*.sql.gz          | mariadb -u datan -p datan_symfony
 ```
 
-Contrôle immédiat — les trois nombres doivent correspondre à ceux du poste :
+Le glob `datan_2*` évite de recharger le fichier `_messenger` déjà passé.
 
-```sql
-SELECT (SELECT COUNT(*) FROM vote)         AS votes,          -- 2 464 905
-       (SELECT COUNT(*) FROM vote_groupe)  AS ventilations,   --   196 195
-       (SELECT COUNT(*) FROM decryptage)   AS decryptages;
-```
+> **Ne pas importer par phpMyAdmin.** Deux obstacles rédhibitoires : la première
+> ligne du dump, `/*M!999999\- enable the sandbox mode */`, que plusieurs
+> versions ne savent pas analyser ; et la taille, qui dépasse
+> `upload_max_filesize` comme `max_execution_time`. L'import s'arrête alors **au
+> milieu d'une table**, et l'état obtenu n'est pas réparable autrement qu'en
+> repartant d'une base vide.
 
-### c. Clones Tricoteuses
+### c. Contrôle de la restauration
+
+54 tables attendues, et les compteurs suivants à l'unité :
+
+| Table | Lignes | | Table | Lignes |
+| --- | --- | --- | --- | --- |
+| `scrutin` | 18 311 | | `decryptage` | 250 |
+| `vote` | 2 464 905 | | `commune` | 35 720 |
+| `vote_groupe` | 196 195 | | `resultat_legislative` | 431 267 |
+| `depute` | 3 117 | | `cr_parole` | 263 808 |
+| `amendement` | 128 958 | | `doctrine_migration_versions` | 45 |
+| `dossier` | 14 017 | | | |
+
+`vote_groupe` à 196 195 confirme que les corrections `PO0` ont voyagé,
+`doctrine_migration_versions` à 45 que le serveur ne rejouera aucune migration,
+et `decryptage` à 250 rappelle que ce chiffre vient du backup **anonymisé** — la
+vraie base en a davantage (cf. §2.e).
+
+### d. Clones Tricoteuses
 
 Le dump apporte les données, pas les dépôts. Sans eux, le premier
 `app:sync:quotidien` reclone tout (1,8 Go) au lieu de lire un delta.
@@ -212,52 +278,84 @@ Deux workflows sont posés dans `.github/workflows/`.
 
 ### `qualite.yml` — à chaque push et pull request
 
-Syntaxe PHP, gabarits Twig, YAML, conteneur de services, puis **les 45
-migrations rejouées sur une base MariaDB 11.7 vierge** suivies de
-`doctrine:schema:validate`. C'est ce dernier contrôle qui compte : sans test
-unitaire, c'est la seule chose qui attrape une entité modifiée sans migration —
-défaut qui, sinon, ne se manifeste qu'en production par une page en erreur.
+Syntaxe PHP, gabarits Twig, YAML, conteneur de services, puis **les migrations
+rejouées sur une base vierge** suivies de `doctrine:schema:validate`.
+
+La base d'intégration est en **MariaDB 10.6, celle du serveur — pas 10.7 ni 11.7
+comme le poste de développement**. C'est tout l'intérêt du contrôle : une
+migration écrite sur 11.7 peut produire du DDL que 10.6 refuse. C'est arrivé lors
+de la première restauration — `profession_foi` avait hérité de
+`utf8mb4_uca1400_ai_ci`, collation apparue en MariaDB 11.4, et l'import s'est
+arrêté dessus (`#1273 Unknown collation`). Avec ce workflow, l'écart se voit à la
+pull request, pas au milieu d'un chargement de 1 Go.
+
+C'est aussi le seul filet du dépôt : il n'y a aucun test.
 
 ### `deploiement.yml` — sur push vers `master`
 
-`composer install --no-dev --optimize-autoloader`, transfert rsync vers
-`releases/<sha>`, puis `bin/deployer.sh` sur le serveur : migrations,
-`asset-map:compile`, `cache:warmup`, bascule du lien symbolique, rechargement de
-PHP-FPM, purge des versions au-delà des cinq dernières. Le workflow finit par
-interroger l'URL publique et échoue si elle ne répond pas 200.
+Déploiement **par `git pull` sur le serveur**, comme `PoliticAnalysis` qui vit
+sur la même machine. L'hébergement est mutualisé : ni systemd, ni droit de
+recharger PHP-FPM, donc rien à gagner à copier des répertoires de version.
 
-L'ordre n'est pas indifférent : **tout se fait dans la nouvelle version avant la
-bascule**. Une étape qui échoue laisse le site servir l'ancienne, et le
-déploiement raté ne se voit pas de l'extérieur.
+Enchaînement, en SSH :
 
-C'est aussi ce qui rend le déploiement compatible avec le sync de 6 h. Vider
-`var/cache/prod` sous une commande en cours la fait échouer sans message
-exploitable ; avec un cache par version, la commande en vol garde le sien.
+1. refus de déployer si `app:sync:quotidien` tourne — vider `var/cache/prod` sous
+   une commande en cours la fait échouer sans message exploitable ;
+2. `git pull origin master` ;
+3. `php ~/composer.phar install --no-dev --optimize-autoloader` ;
+4. `doctrine:migrations:migrate` ;
+5. **`importmap:install`** — `assets/vendor/` est dans `.gitignore` et Stimulus
+   comme Turbo sont déclarés distants dans `importmap.php` : sans cette étape,
+   ils manquent et la compilation suivante sort un site sans JavaScript ;
+6. `asset-map:compile` ;
+7. `cache:clear --env=prod`, en dernier — le conteneur compilé fige le nombre
+   d'arguments de chaque constructeur, et du code neuf sur un cache ancien fait
+   tomber les pages en `ArgumentCountError`.
+
+Le workflow finit par interroger l'URL publique et échoue si elle ne répond
+pas 200.
 
 ### Secrets et variables à créer
 
+Mêmes noms que `PoliticAnalysis` : les valeurs se recopient telles quelles, le
+serveur étant le même.
+
 | Nom | Type | Valeur |
 | --- | --- | --- |
-| `SSH_CLE_PRIVEE` | secret | contenu de `~/.ssh/datan_deploy` |
-| `SSH_HOTE` | secret | `datan.remikel.fr` |
-| `SSH_UTILISATEUR` | secret | `deploy` |
-| `SSH_HOTE_CLE_PUBLIQUE` | secret | sortie de `ssh-keyscan` |
-| `CHEMIN_BASE` | variable | `/var/www/datan` |
+| `DEPLOY_KEY` | secret | clé privée SSH de déploiement |
+| `DEPLOY_HOST` | secret | hôte du mutualisé |
+| `DEPLOY_USER` | secret | `wqktajhw` |
+| `DEPLOY_PORT` | secret | port SSH |
+| `DEPLOY_PATH` | variable | `/home/wqktajhw/datan` (valeur par défaut du workflow) |
 | `URL_PUBLIQUE` | variable | `https://datan.remikel.fr` |
-| `SSH_PORT` | variable | facultatif, 22 par défaut |
 
-À créer dans deux *environments* GitHub, `preproduction` et `production` : un
-push ne déploie qu'en préproduction, la production se déclenche à la main par
-`workflow_dispatch`. Poser une règle d'approbation sur l'environnement
-`production` pour que la bascule reste un geste délibéré.
+### Amorçage, à faire une fois
 
-### Une permission sudo à ouvrir
+Le workflow suppose un dépôt déjà cloné et configuré :
 
-`deployer.sh` recharge PHP-FPM. Sans mot de passe :
-
-```sudoers
-deploy ALL=(root) NOPASSWD: /bin/systemctl reload php8.3-fpm
+```bash
+cd /home/wqktajhw
+git clone git@github.com:datanfr/datanSymfony.git datan
+cd datan
+php ~/composer.phar install --no-dev --optimize-autoloader
 ```
+
+Puis `/home/wqktajhw/datan/.env.local`, en `chmod 600` — **avec le vrai
+`serverVersion`** :
+
+```dotenv
+APP_SECRET=<64 caractères>
+DATABASE_URL="mysqli://wqktajhw_xxx:<mdp>@127.0.0.1:3306/wqktajhw_datan?serverVersion=10.6.27-MariaDB&charset=utf8mb4"
+MAILER_DSN=<DSN Mailjet réel>
+```
+
+> `serverVersion=10.6.27-MariaDB`, et surtout pas le `11.7.2-MariaDB` du poste.
+> Un `serverVersion` qui ment fait générer à Doctrine du DDL calibré pour une
+> version que le serveur ne comprend pas — exactement la panne de la collation.
+
+Enfin, le sous-domaine `datan.remikel.fr` doit pointer sur
+`/home/wqktajhw/datan/public`, et non sur `/home/wqktajhw/datan` : servir la
+racine du projet exposerait `.env`, `var/` et `vendor/`.
 
 ---
 
