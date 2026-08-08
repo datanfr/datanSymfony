@@ -68,7 +68,9 @@ class SearchController extends AbstractController
      * Endpoint de l'autocomplétion. `dist/autocomplete_search.js` l'interroge en
      * `GET /search_api?q=…[&type=ville]` et attend un tableau JSON d'objets
      * `{text, url, source}` — `text` étant le libellé déjà surligné, `url` une
-     * adresse SANS barre initiale (le script préfixe `base_url + '/'`).
+     * adresse SANS barre initiale (le script la préfixe d'un `/`, relatif à
+     * l'origine servie — surtout pas de `base_url` absolue, qui ferait sortir
+     * la préproduction vers datan.fr).
      *
      * Pas d'en-tête de cache : comme le legacy, la réponse est vive (le proxy
      * intégré ne met en cache que ce qui porte un `s-maxage`). La sortie est

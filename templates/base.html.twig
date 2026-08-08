@@ -2,7 +2,16 @@
 <html lang="fr" dir="ltr" prefix="og: http://ogp.me/ns#">
   <head>
     <meta charset="utf-8">
-    <meta name="robots" content="{% block robots %}index,follow{% endblock %}">
+    {# Sur un hôte non indexable — la préproduction — la balise ne consulte plus
+       le bloc : aucune page ne doit être indexée, pas même celle qui demande
+       `index,follow`. Le même verdict sort en en-tête HTTP sur *toute* réponse
+       ({@see App\Referencement\EnTeteRobots}) ; cette balise-ci reste utile aux
+       moissonneurs qui ne lisent que le HTML. #}
+    {% if site_indexable() %}
+      <meta name="robots" content="{% block robots %}index,follow{% endblock %}">
+    {% else %}
+      <meta name="robots" content="noindex, nofollow, noarchive">
+    {% endif %}
     <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
     <title>{% block title %}Datan{% endblock %}</title>
     <meta name="title" content="{{ block('title') }}">

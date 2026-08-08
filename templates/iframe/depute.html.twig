@@ -8,7 +8,9 @@
 <html lang="fr" dir="ltr" prefix="og: http://ogp.me/ns#">
 <head>
   <meta charset="utf-8">
-  <meta name="robots" content="index,follow">
+  {# Document autonome : il ne profite pas de la bascule de base.html.twig et
+     porte la sienne. #}
+  <meta name="robots" content="{{ site_indexable() ? 'index,follow' : 'noindex, nofollow, noarchive' }}">
   <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
   <title>{{ depute.firstname }} {{ depute.lastname }} - Activité Parlementaire | Datan</title>
   <meta name="description" content="Découvrez les résultats des votes de {{ accord == 'e' ? 'la' : 'le' }} {{ depute_mot }} {{ depute.firstname }} {{ depute.lastname }} : taux de participation, loyauté avec son groupe.">

@@ -43,6 +43,11 @@ class SyncQuotidienCommand extends Command
         // base gelée dont ils venaient.
         ['app:import:profils-sociaux', [], 'Profils socio-professionnels'],
         ['app:import:photos', [], 'Photographies des députés'],
+        // Dans la foulée : une photo publiée sans son détourage sortirait avec
+        // le fond de studio bleu au milieu d'une carte blanche. L'étape ne
+        // retraite que ce que la précédente vient d'écrire — 647 portraits déjà
+        // faits coûtent le temps d'un `filemtime()` chacun.
+        ['app:photos:detourer', [], 'Détourage des photographies'],
         ['app:import:dossiers', [], 'Dossiers législatifs'],
         // Avant les scrutins : c'est au scrutin de désigner l'amendement qu'il
         // met aux voix, l'amendement doit donc déjà exister.

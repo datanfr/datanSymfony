@@ -3,13 +3,13 @@
                FUNCTION IF LOCALHOST
 ################
 */
+// L'hôte courant, et non « https://datan.fr » comme dans le legacy : celui-ci
+// n'a que deux environnements (localhost et la production), quand nous servons
+// aussi une préproduction (datan.remikel.fr). L'ancienne forme y renvoyait les
+// liens de recherche et l'inscription à l'infolettre vers le site de
+// production — on ne quitte plus l'origine que l'on sert.
 function get_base_url() {
-  var localhost = 'http://localhost/datan';
-  if (location.hostname === "localhost" || location.hostname === "127.0.0.1") {
-    return localhost;
-  } else {
-    return 'https://datan.fr';
-  }
+  return location.origin;
 }
 /*
 ################

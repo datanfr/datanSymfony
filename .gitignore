@@ -45,6 +45,10 @@
 # quotidien. Les committer alourdirait le dépôt de 5,4 Mo pour rien, et les
 # figerait au jour du commit.
 /public/assets/imgs/deputes/
+# Même raison pour leur détourage, produit par `app:photos:detourer` à partir
+# des précédentes. À ne pas confondre avec `deputes_nobg/`, découpé à la main
+# sur le serveur du site : celui-là, s'il arrive un jour ici, est à committer.
+/public/assets/imgs/deputes_detoures/
 
 /assets/vendor/
 ###< symfony/asset-mapper ###

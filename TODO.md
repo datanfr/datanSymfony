@@ -1,599 +1,276 @@
-# Reste à faire
+# TODO — plan de correction issu de la comparaison datan.fr ↔ datan.remikel.fr (2026-08-08)
 
-État au 30 juillet 2026, après les deux passes menées à cinq les 29 et
-30 juillet : tout ce qui est livré **et vérifié** a été retiré — le détail des
-chantiers soldés est dans l'historique git de ce fichier. Les conventions et les
-pièges métier sont dans `CLAUDE.md`. La comparaison visuelle à datan.fr est
-**close** : périmètre public et écrans publics de connexion sur captures,
-espace connecté profond sur le code du legacy (cf. §4).
+Campagne de comparaison complète : diff des 14 sitemaps (~40 000 URL), comparaison
+HTML de 10 sections, captures pleine page de 6 pages clés, mesures de temps de
+réponse. Verdict : portage très fidèle, performance équivalente. Reste ce qui suit,
+classé par priorité. Chaque point dit **quoi**, **où chercher**, et **comment vérifier**.
 
-Le périmètre de référence (`../datan/application/config/routes.php` et le
-`.htaccess`) est couvert : chaque adresse publique du legacy est servie,
-redirigée en 301, ou écartée pour une raison consignée au §3.
+Rappel de méthode : datan.fr est derrière une protection anti-rafale (429 o2switch) —
+toute vérification côté legacy se rejoue **une URL à la fois**. Une section « vide »
+sur une capture headless peut n'être qu'un artefact de `loading="lazy"` : vérifier le
+HTML avant de conclure.
 
-## 1. Chantiers restants
+---
 
-- [ ] **Professions de foi : la table est vide, les PDF manquent.** Le bloc
-      « Ses professions de foi » de la fiche est porté
-      (`depute/_professions_foi.html.twig`) et son import écrit
-      (`app:import:professions-foi`), mais `profession_foi` est **vide dans le
-      backup public** et les PDF (`assets/data/professions/election_*/`) ne sont
-      pas dans nos assets. À rejouer contre la vraie base au déploiement (§2),
-      avec la copie du répertoire d'assets. D'ici là le bloc reste masqué.
-- [ ] **HATVP : dernier métier déclaré.** Le legacy ajoute au bloc métier un
-      paragraphe et une modale sur les activités déclarées à la HATVP. La table
-      `hatvp` du backup public est **vide (0 ligne)** : même traitement que les
-      professions de foi.
-- [ ] **Les photos détourées de datan.fr ne sont pas dans ce dépôt.** Le site
-      sert un portrait détouré, recadré carré en 240 × 240 depuis la 17e
-      (`assets/imgs/deputes_original/`) ou en 150 × 192 avant
-      (`assets/imgs/deputes_nobg/`), plus leurs variantes webp. Nous n'avons que
-      le portrait brut de l'Assemblée publié par `app:import:photos` : le cadre
-      carré le rezoome sur le visage, ce qui se voit sur **chaque carte du
-      site**, et les législatures passées tombent presque toutes sur le visage
-      générique — le dépôt des Tricoteuses ne couvre que les députés actuels.
-      `PhotoExtension` cherche désormais les jeux détourés en premier : le jour
-      où les dossiers sont là, la parité est acquise sans toucher au code. Ils
-      pèsent une centaine de mégaoctets, ne se régénèrent pas (détourage fait à
-      la main) et ne vivent que sur le serveur : **à recopier au déploiement**,
-      comme les PDF des professions de foi.
-- [ ] **68 scrutins de la 17e restent sans rattachement complet** (20 sans
-      amendement, 48 sans dossier) après `app:lien:scrutins` — deux amendements
-      gagnés le 4 août par arbitrage manuel (`RATTACHEMENTS_ARBITRES` de
-      `LienScrutinsCommand`, avec 7 dossiers corrigés et le vote du Congrès).
-      Le recours, `app:scraper:scrutins --relance`, rejoué le 30 juillet puis
-      le 4 août : 68 pages visitées, **zéro gain** — 17 pages sans aucun lien
-      d'amendement, 3 numéros discordants, et les pages des sans-dossier
-      n'offrent rien non plus. L'écart est chez la source : l'Assemblée n'a pas
-      complété ses pages. À relancer de loin en loin, rien à corriger chez nous.
-- [ ] **`simplicite_ia` des résumés repris de la production.** La génération la
-      produit désormais (entier 1-5, même échelle et même invite que
-      PoliticAnalysis, qui la poussait sur `/api/amendements_ia`) et l'écran des
-      amendements la rend comme le legacy — badge « n/5 », vert à partir de 4,
-      orange à 3, rouge en dessous. Restent « — » les 137 résumés repris de la
-      base d'origine : leur note existe dans `amendements_ia.simplicite_ia`, mais
-      le TSV lu par `app:import:annexes` s'arrête à `reviewed`. Une neuvième
-      colonne à l'export et au `flush()` la récupérerait — avec la garde
-      `COALESCE(VALUES(c), c)`, sans quoi rejouer un ancien TSV effacerait les
-      notes générées depuis.
-- [ ] **Résumés d'amendements en lot** (`app:ia:resumes-amendements`) : à lancer
-      sciemment **après** le choix d'`IA_MODELE` de production — la garde
-      « jamais écraser un résumé existant » fait qu'un lot passé au modèle
-      d'essai local bloquerait pour toujours un lot plus propre. Pour éprouver un
-      modèle sans consommer le lot : `--simulation`, qui génère, affiche et
-      n'écrit rien (elle rend aussi la distribution des notes de simplicité —
-      gemma4:latest en a donné 5 à des amendements techniques, cf. le rapport
-      d'essai : l'échelle d'un petit modèle local n'est pas celle attendue).
+## P0 — Contrat d'URL (bloquant : des URL indexées rendent 404)
 
-## 2. Au déploiement
+- [ ] **Commune « Faux » (Dordogne) importée sous le slug « 0 ».**
+  `/elections/resultats/dordogne-24/ville_faux` → 404 ; la page existe sous
+  `/…/ville_0` avec « Résultats des élections à 0 » en title/h1/breadcrumb, et le
+  sitemap annonce `ville_0`. Cause quasi certaine : « faux » converti en booléen
+  puis casté en chaîne quelque part (import des communes ou génération du slug).
+  - Corriger la source (slug + nom en base), pas seulement la route.
+  - Vérifier : `ville_faux` → 200 avec « Faux » partout ; `ville_0` → 404 ou 301 ;
+    le sitemap `elections-v` n'annonce plus `ville_0` ; chercher d'autres victimes
+    du même cast (`SELECT * FROM commune WHERE nom IN ('0','1','') OR slug IN ('0','1','')`).
 
-Rien à coder d'avance ; à dérouler le jour J, dans cet ordre de préférence.
+- [ ] **Slugs de communes à article parenthésé : poser des 301.**
+  `/elections/resultats/jura-39/ville_etoile` et
+  `/elections/resultats/ardeche-07/ville_nonieres` répondent 200 sur le legacy
+  (et sont liées depuis ses pages département) mais 404 sur le staging, qui ne
+  connaît que `ville_etoile-(l)` et `ville_nonieres-(les)`. Une URL legacy ne rend
+  jamais 404 : rediriger en 301 vers la forme du staging, sur le modèle de
+  `DepartementController::versLAdresseCanonique()`.
+  - Le legacy est incohérent avec lui-même (il garde « (les) » pour Assions mais le
+    retire pour Nonières) : recenser TOUTES les communes dont le slug legacy diffère
+    du slug staging (diff des sitemaps `elections-v` + `localites-v`) et couvrir la
+    liste entière, pas seulement ces deux-là.
+  - Nota : `ville_assions-(les)` et `ville_bonvillers-(mont)` étaient inaccessibles
+    sur le legacy lui-même (400 CodeIgniter) : leur fonctionnement en staging est une
+    correction assumée, rien à faire.
 
-- [ ] **Variables de production** : `MATOMO_URL=https://matomo.datan.fr`,
-      `GTM_ID=GTM-K3QQNK2`, `MAILER_DSN` réel, `IA_MODELE` — et la clé
-      `ANTHROPIC_API_KEY` dans `.env.local`, **jamais** dans `.env`. Revérifier
-      alors le texte des mentions légales avec la pile de suivi réellement active.
-- [ ] **Rejouer les imports de récupération contre la vraie base** — le backup
-      public est réduit et anonymisé : `app:import:utilisateurs` (tous les
-      comptes, `users_mp`, mots de passe repris tels quels), les auteurs du
-      blog, `campaigns` et `newsletter` (vides dans le backup — **transvaser les
-      abonnés réels avant l'ouverture**), `app:import:professions-foi` **avec la
-      copie du répertoire `assets/data/professions/`**, et les décryptages
-      (`app:import:decryptages`, 250 au 15/07/2026 dans le backup public — la
-      vraie base en a davantage). Un import de récupération écrase les écritures
-      locales : à ne jamais planifier.
-- [ ] **Purger les comptes d'essai** : `redaction`, `editeur`, `guibert`.
-- [ ] **Courriels** : le legacy compose en MJML (`qferr/mjml-php`) et envoie par
-      Mailjet — newsletter mensuelle (`newsletter/votes`, CLI), transactionnels,
-      `/newsletter/edit/{email}` + `/newsletter/delete`, courriel d'activation
-      du compte député (aujourd'hui le lien s'affiche à l'administrateur pour
-      transmission manuelle).
-- [ ] **Pile anti-spam** : captcha et pénalité anti-force-brute (inscription,
-      demande de compte député, mot de passe oublié).
-- [ ] **Publication data.gouv** (`opendata()` de `daily.php`) : les jeux CSV que
-      notre pied de page pointe. À replanifier, hors `app:sync:quotidien`.
-- [ ] **Planification** : `bin\planifier-sync.ps1` (sync quotidien) ;
-      `app:calcul:statistiques-deputes` **après chaque import de votes** (hors
-      sync) ; `app:moissonner:bluesky` à la demande.
-- [ ] **Cloner les dépôts figés et rejouer leurs imports** : ils ne sont pas
-      dans la moisson nocturne et n'existent donc que sur la machine où on les a
-      demandés. `scrutins-xiv`/`-xv`/`-xvi` (`app:import:scrutins --tout`, puis
-      `app:calcul:statistiques-deputes --legislature=N`), `dossiers-xv` et
-      `dossiers-xvi` (`app:import:dossiers-acteurs --depot=…`, sans quoi le bloc
-      auteur des pages de vote de 2017-2024 reste vide sur 2 500 scrutins).
-- [ ] **Niveau serveur** : redirection https (le hook `ssl.php` du legacy y est
-      resté) ; si des tiers consomment l'ancienne API (`api/tables`,
-      `api/votes`, `api/exposes`…), poser des redirections — API Platform ne
-      reprend pas ce découpage.
-- [ ] **Héberger en propre le fond du Palais Bourbon** : la page de connexion
-      pointe un fichier Wikimedia, dépendance héritée du legacy.
+## P1 — Fiches vote : title et casse du h1 (18 311 pages, SEO)
 
-## 3. Abandonné sciemment — ne pas y revenir
+- [ ] **Reprendre le gabarit `<title>` du legacy.**
+  Legacy : `Vote n°997 - Vote final - <titre> - 17e législature | Datan` ;
+  staging : `<titre brut> - Vote n°997 - Datan` (avec le titre en minuscule
+  initiale). Reproduire le format legacy, y compris le segment « Vote final - »
+  quand il y est et le suffixe « Ne législature | Datan ».
+- [ ] **Retirer le `|capitalize` (ou équivalent) du h1.**
+  Twig `capitalize` écrase les majuscules internes : « Motion de censure de la
+  **nupes** contre le gouvernement d'**élisabeth borne** » (vote_1 L16),
+  « l'amendement de **m. aviragnet** » (vote_100 L15). Le legacy rend le titre tel
+  quel avec une majuscule initiale : utiliser un `ucfirst` qui ne touche pas au
+  reste.
+  - Vérifier sur : vote_1 L16 (NUPES, Élisabeth Borne), vote_100 L15 (M. Aviragnet),
+    vote_997 L17 (déjà tout en minuscules : ne doit pas bouger), vote_1243 L16.
 
-- **Le maire d'une commune** : `cities_mayors` vide dans notre copie, et la
-  donnée de production a dérivé (« Hubert De jenlis »). Une donnée fausse ne
-  vaut pas mieux qu'une absente.
-- **Les tables `elect_bv_*`** (grain bureau de vote, jamais écrites) et les
-  **résultats municipaux du ministère** (`elect_municipales_*`) : le chantier en
-  cours du legacy, pas une donnée à porter. (Les **candidatures** municipales
-  des députés, elles, sont importées depuis que la production a ajouté
-  l'élection `id = 7` à son catalogue — cf. §1 pour les encarts de fiche qui
-  restent à porter.)
-- **La modale de première visite** : éditorial daté, codé en dur, éteinte à la
-  source. (Le **`voteFeature`** — l'encart « dernier vote important » — est en
-  revanche bien porté : datan.fr l'affiche, il n'était pas éteint. Cf. §4.)
-- **La phrase « famille professionnelle » de la bio** : présente dans la vue du
-  legacy (`_bio.php:110`), mais `Deputes.php:216` a commenté l'appel qui la
-  nourrit et passe `null` — datan.fr ne l'affiche donc jamais (vérifié sur le
-  site vivant le 30/07/2026). L'omettre est la parité, et `ProfilSocial` portant
-  la donnée n'y change rien : même famille d'extinction à la source que la
-  modale ci-dessus. Commenté dans `depute/_bio.html.twig`.
-- **`/commissions`** : la page du legacy est un « en construction » de 2,6 Ko
-  sans en-tête ni pied — rien à imiter. La nôtre est donc une création propre,
-  sans référence : ce qui s'y casse est un défaut de ce dépôt, pas un écart de
-  portage, et ne se compare à rien.
-- **Le générateur d'iframe du dashboard député** : `show_404()` à la source.
-- **`admin/api-keys`** (caduc : le seul client était PoliticAnalysis, la
-  génération est interne depuis le 24 juillet), **`admin/elections/*`**
-  (fenêtre de candidatures close depuis 2022), **`admin/votes`** (doublon du
-  CRUD des décryptages).
-- **`get_questions_api` du quiz** (branché sur aucune route) et la table
-  **`questions`** parlementaires (code mort des deux côtés ; si une page naît
-  un jour, c'est un import open data Tricoteuses, pas une récupération).
-- **`/redirect/cities/{code}/{dpt}`** : 404 sur datan.fr même.
-- **`pfaciana/tiny-html-minifier`** : au composer du legacy, introuvable à
-  l'usage.
+## P1 — Données de production en retard ou non portées
 
-## 4. Points de vigilance sur l'existant
+- [ ] **Rejouer `app:import:explications`** contre la vraie base : les 3 cartes
+  « Dernières explications de vote » de l'accueil datent d'avant l'import
+  (et le staging affiche 2× Maxime Laisney).
+- [ ] **Rattraper les décryptages postérieurs au 2026-07-09** : il en manque 2
+  (acétamipride 20 juil., aide à mourir 15 juil. 2026) — 238 vs 240. Visible sur
+  l'accueil, `/votes`, `/votes/decryptes`, `/soutenir` et les carrousels.
+  Contenu éditorial non régénérable : import de récupération, jamais en cron.
+- [ ] **Décider et porter la table des maires.** « Le maire de X est Y. » manque sur
+  toutes les pages commune, et la ligne « 🏛️ Maire » manque dans l'encadré des pages
+  résultats. L'omission est documentée dans `templates/departement/commune.html.twig`
+  (table vide dans la base de dev). Récupérer l'export TSV depuis la prod (docblock
+  `docker exec` à poser sur la commande d'import) ou assumer l'absence — mais le
+  legacy l'affiche, donc parité = la porter.
+- [ ] **Porter la section « Ses professions de foi » des fiches député** (tableaux
+  législatives 2024/2022, boutons « Profession 1er/2nd tour »). Section entière
+  absente du staging (~460 px). Vérifier d'où le legacy tire les fichiers PDF/liens.
+- [ ] **Déployer les images in-article du blog** : `/assets/imgs/posts/inside/*.png`
+  → 404 sur le staging. Invisible aujourd'hui (le HTML stocké des articles pointe en
+  absolu vers `https://datan.fr`) mais tout casse à la bascule de domaine.
+  Copier le répertoire depuis la prod, puis vérifier chaque `posts/inside/` référencé
+  par un article → 200.
 
-- **La fiche d'un ancien député se reconstitue par `fonction_groupe`, jamais par
-  `depute.groupe_id`.** La colonne ne porte que l'appartenance courante : les
-  1 545 fiches d'anciens sortaient sans liseré, sans groupe sur leur carte de
-  profil, sans la phrase « a siégé avec le groupe … » et sans moyennes de
-  groupe, là où le site garde le dernier groupe connu dans
-  `deputes_last.groupeId`. `DeputeController::dernierGroupe` le résout (dernier
-  rattachement principal), et deux paragraphes manquaient au gabarit : la sortie
-  de l'Assemblée avec son motif et le rattachement financier au passé. Deux
-  branches de `Depute_edito::get_end_mandate()` **oublient leur `return`**
-  (démission, annulation de l'élection) : le site publie « … le 09 avril 2026 . »
-  sans motif sur 113 fiches ; le motif est rétabli ici, oubli d'écriture et non
-  choix éditorial.
-- **Un exposé d'amendement peut ouvrir par `<p style="…">`, et la garde le
-  ratait.** Le gabarit de la page de vote choisissait entre `|raw` et texte
-  échappé sur la présence de la chaîne `'<p>'` — chevron fermant compris :
-  2 359 des 7 200 exposés mis aux voix ouvrent par `<p style="text-align:…">`
-  et sortaient donc en HTML visible, balises et entités en toutes lettres.
-  Le test porte désormais sur `'<p'`. À se rappeler pour toute garde qui
-  reconnaît du HTML à une balise nue.
-- **Une page de vote peut montrer un dossier — et son auteur — là où le site
-  n'en montre aucun.** Le lien scrutin → dossier n'est pas dans l'open data
-  avant 2026 et le legacy le **scrape** (`assemblee-nationale.fr/dyn/`) ; nous
-  le tenons du fichier de scrutin des Tricoteuses. Là où son scraping n'a rien
-  ramené, datan.fr n'affiche ni le dossier, ni son titre, ni le bloc auteur, et
-  nous les affichons tous les trois — vu sur le scrutin 6269 de la 17e (une
-  demande de suspension de séance sur la proposition de loi rapportée par
-  Charles Rodwell), 1 des 96 pages comparées le 5 août. C'est un manque de leur
-  côté, pas un choix : ne pas s'aligner en retirant ce que nous savons.
-- **Une cellule de cohésion vide n'est pas un zéro.** Un groupe dont personne
-  n'a voté (« Non votant ») affiche une cellule vide sur datan.fr ; nous
-  écrivions `0.000`, ce qui affirme un groupe parfaitement désuni là où il n'y
-  a rien à mesurer. `VoteController::groupBreakdown` rend `null` sur zéro
-  exprimé depuis le 4 août.
-- **La participation d'un groupe est plus haute que sur datan.fr, et c'est le
-  site qui a tort.** Le legacy calcule cette part de deux façons : `total /
-  (membres − nonVotants)` dans `daily.php:2620`, qui alimente `class_groups` et
-  toutes les participations de ses fiches de groupe, mais `(pours + contres +
-  abstentions − nonVotants) / membres` sur sa seule page de vote
-  (`Votes_model::get_vote_groupes`) — le `− nonVotants` a changé de côté de la
-  division. Or les non-votants forment un ensemble **disjoint** des votants
-  (`decompteNominatif` du scrutin 8409 : le non-votant EPR n'est pas parmi les
-  douze « pour »), si bien que le numérateur du site passe sous zéro sur 609
-  lignes, qu'il rattrape par un `WHEN pct < 0 THEN 0` : le scrutin 3170 y
-  affiche « contre : 6 » et « participation : 0 % » sur la même ligne. Nous
-  divisons partout par les membres en mesure de voter (`ParticipationGroupe`,
-  qui porte la démonstration). Écart attendu, toujours à la hausse, sur 24 996
-  des 196 050 ventilations — à ne pas « corriger » vers le site. Les moyennes de
-  groupe, elles, sont inchangées : l'écart disparaît à l'arrondi.
-- **`VOTES_CLES` est une sélection éditoriale vivante — la resynchroniser sur le
-  legacy, pas la deviner.** Le 4 août 2026, `Votes_model::get_key_votes_mp()` et
-  le site vivant servaient quatre scrutins, tous 17e (3260, 3300, 8280, 8427),
-  rendus par numéro croissant ; les deux scrutins 16e d'une sélection antérieure
-  (IVG 629, immigration 3213) ont été retirés par la rédaction —
-  `app:import:votes-cles` et ses votes restent en base, sans consommateur
-  jusqu'aux fiches des législatures passées. La préposition doublée « en faveur
-  de du projet de loi » est morte avec le texte qui la portait, mais la garde de
-  composition reste dans `_positions.html.twig` : un texte en « du … » se
-  contracte en « en faveur du … », datan.fr publiait le doublon.
-- **Le titre « … votait rarement avec : » est vide sur datan.fr en mode
-  historique — pas chez nous.** `$second_section_title` n'est affecté que dans
-  le `if (isset($proximite))` de `_inter_group_loyalty.php`, et `Depute_service`
-  ne calcule `$proximite` que pour la législature courante : sur
-  `/deputes/…/legislature-16`, le site sort un `<h4>` sans texte au-dessus du
-  second graphique, quand le titre symétrique (« votait souvent avec : »),
-  affecté hors de la garde, s'affiche bien. Variable oubliée, pas choix
-  éditorial — nous écrivons le titre. Écart visible sur capture, à ne pas
-  « corriger » vers le site.
-- **Le pied de la fiche de groupe de datan.fr parle de la législature
-  précédente — pas nous.** Sur `/groupes/legislature-17/lfi-nfp`, le site titre
-  « Les groupes parlementaires de la 16ème législature » au-dessus de liens qui
-  pointent tous vers la 17e, et son bloc d'apparentés renvoie vers
-  `legislature-16/lfi-nupes/membres` : sa variable `$groupe` a été écrasée par
-  l'incarnation précédente du groupe avant `mps_footer.php`. Notre transcription
-  du même gabarit est fidèle et rend, elle, la législature de la fiche. Écart
-  visible sur capture, à ne pas « corriger » vers le site.
-- **L'encart « Municipales 2026 » d'un groupe compte des députés EN EXERCICE.**
-  Règle de l'accueil (visible + candidat + mandat 17e ouvert) : LFI-NFP 50 chez
-  nous contre 51 sur le site, dont le comptage (`get_n_candidates_by_group`,
-  `deputes_last.groupeId` sans filtre d'activité) garde un ex-député — David
-  Guiraud, parti de l'Assemblée. Sa propre page d'accueil compte 311 comme
-  nous. Divergence assumée : la phrase dit « députés membres du groupe ».
-- **« de la commune X » de l'encart municipales : l'article est recomposé, avec
-  deux corrections.** La colonne `nom_de` des `cities` du legacy n'est pas dans
-  notre référentiel : `DeputeController::communeAvecDe/AvecA` la refont (« du
-  Havre », « aux Abymes », « d'Aix-en-Provence »). Corrigés au passage, avec le
-  commentaire d'usage : « à La Rochelle » et « à L'Aigle », où le site perd
-  l'article (« à Rochelle », « à Aigle » — famille « à la La Réunion »). Une
-  divergence de donnée demeure : le site écrit « d'Évry-Courcouronnes » (sa
-  colonne `nom_de` suit un millésime INSEE plus récent) là où notre référentiel
-  — et sa propre fiche de ville — disent « Evry ».
-- **La position majoritaire d'un groupe se RECALCULE, elle ne se reprend pas.**
-  Le champ `positionMajoritaire` publié par l'Assemblée ne départage que le
-  « pour » et le « contre » : un groupe à 4 pour / 1 contre / 17 abstentions y
-  est déclaré « pour ». Le site calcule depuis toujours la pluralité stricte sur
-  les trois positions (`daily.php:1439-1449`) — égalité ou personne d'exprimé →
-  `nv`. Avoir repris le champ publié avait faussé **6 983 ventilations** (dont
-  4 945 en 17e) et, par ricochet, toutes les loyautés, proximités et classements
-  du site (Bernalicis à 98 % au lieu de 100 %). La règle vit dans
-  `ImportScrutinsCommand::ligneVentilation` : ne pas la « simplifier ».
-  **Après toute reprise de `vote_groupe`, relancer
-  `app:calcul:statistiques-deputes` et `app:calcul:classements`**, qui en
-  dérivent.
-- **Le correctif SOC de la 16e vit dans `ImportScrutinsCommand`, comme celui de
-  la position majoritaire.** L'Assemblée publie une partie des ventilations du
-  groupe socialiste sous `PO800496` après son renommage en SOC-A (`PO830170`)
-  le 19/10/2023 : 581 ventilations réattribuées le 30 juillet (purge des
-  lignes fausses **avant** réimport de la 16e — l'upsert ne supprime jamais,
-  cf. la règle des imports). Vérifié contre le site : participation SOC 18 %,
-  SOC-A 19 %, cohésion 0,95, courbes SOC closes en octobre 2023, moyennes
-  d'assemblée 21 % / 0,94 identiques. Rejeu :
-  `app:import:scrutins --depot=var/tricoteuses/scrutins-xvi --tout --sans-votes`
-  (clone conservé sur place). Reste **8 ventilations SOC-A antérieures au
-  19/10** — l'anomalie inverse, que le correctif du legacy ne traite pas non
-  plus : parité.
-- **La base du conteneur `datan-db` est un instantané, comme le backup
-  public.** Son `daily.php` s'est arrêté au **13 mai 2026** (scrutin n° 6530) :
-  toute mesure qui y est prise date de ce jour-là, et conclure de cette copie
-  à l'état de datan.fr est une faute — commise puis rattrapée le 30 juillet :
-  la proximité EPR ↔ DEM y vaut 87 % quand le site vivant, à jour, affiche
-  88 %. La copie reste précieuse pour une chose que le site ne donne pas :
-  exécuter le vrai code du legacy sur des données connues. C'est ainsi que
-  notre formule de proximité est **prouvée identique** à la leur — sur la
-  fenêtre EPR ↔ UDR, close des deux côtés (3 041 scrutins), les deux calculs
-  donnent 0,4495 exactement.
-- **Les proximités de groupe de la 16e sont des chiffres d'époque, figés — ne
-  pas courir après.** `class_groups_proximite` est reconstruite chaque nuit en
-  `DROP + CREATE` depuis `groupes_accord`, qui ne porte que la législature
-  courante : depuis le passage à la 17e, le code du site **ne peut plus
-  produire** les proximités de la 16e — ses pages 16e servent, via le cache de
-  sortie CodeIgniter, des chiffres calculés à l'époque sur un état des données
-  d'alors. D'où les écarts restants, tous 16e : SOC ↔ ECOLO 68 % chez nous
-  contre 75 % figés, SOC-A ↔ ECOLO 75 % contre 78 %, moyenne de proximité à la
-  majorité 51 % contre 52 %. Nos valeurs sont le recalcul complet sur la
-  législature achevée, correctif SOC compris. Sur la 17e, vivante des deux
-  côtés, site et recalcul coïncident (EPR ↔ DEM 88 %, vérifié le 30 juillet).
-  Même famille que `coalitions_groupes` jamais vidée (ci-dessous) : l'histoire
-  de leurs tables n'est pas reproductible, et ce n'est pas un défaut de
-  portage.
-- **Un pourcentage se refait sur ses entiers, jamais sur `classement.score`.**
-  La colonne est un `decimal(8,3)` : les 45 femmes d'EPR sur 91 sièges y sont
-  stockées `0,495` et ressortent à 50 % au lieu de 49. Ce double arrondi
-  déplaçait d'un point 38 taux de loyauté et 32 de participation.
-  `ClassementController` refait donc le calcul sur `numerateur`/`denominateur`,
-  que la table garde en entiers — **et trie de même**, par produit croisé : sans
-  cela trois députés à 100 % partagent le rang 1 quand le site les sépare
-  (26/26, 2 783/2 783, 2 406/2 407). La même règle laisse en revanche la
-  participation ex æquo au rang 1, les 72 solennels étant communs à tous : c'est
-  bien ce qu'affiche le site.
-- **Le classement d'âge est le seul des neuf à ne pas passer par `RANK()`.**
-  `stats_model.php:29` y numérote au fil de l'eau : deux octogénaires du même
-  âge portent 1 puis 2, et le dernier porte 577. Ne pas « harmoniser » avec les
-  huit autres.
-- **`Stats::index()` n'applique pas le seuil que la page dédiée applique.** La
-  participation des groupes lue sur l'index des statistiques (RN 34 %,
-  LIOT 12 %) n'est donc pas celle de la page dédiée (75 %–95 %). Nous appliquions
-  le seuil aux deux ; les deux valeurs sont désormais reproduites telles quelles.
-  Parité assumée, aussi déroutante soit-elle.
-- **Un ex æquo sans départage change de gagnant d'un rendu à l'autre.** UDDPLR
-  et GDR comptent tous deux 9 cadres sur 17 sièges : sans second critère, la
-  carte en vis-à-vis désignait tantôt l'un, tantôt l'autre. Départage par sigle
-  — ce qui aligne au passage sur l'affichage du site. À vérifier partout où une
-  carte prend le premier d'un tri. **Même famille sur les barres « vote
-  rarement avec »** : elles se prenaient en retournant la fin du tri
-  décroissant, ce qui laisse l'ordre des ex æquo au hasard du tri. Bernalicis
-  en 16e (HOR 19, RE 19, DEM 20, LR 20) sortait RE, HOR, LR contre HOR, RE, DEM
-  sur le site. `ComportementDepute::accordGroupes` refait donc un tri croissant
-  avec le même départage par sigle.
-- **La moyenne de cohésion du site ne correspond pas à ses propres lignes.**
-  `get_stats_avg()` moyenne `class_groups` sans reprendre le `active = 1` du
-  tableau affiché : 0,927 annoncé au-dessus de douze lignes qui donnent 0,925.
-  Même famille sur la participation des députés : le site moyenne toutes les
-  lignes, anciens députés compris, sous un tableau qui n'affiche que les 577 en
-  exercice — ses moyennes sortent un point sous les nôtres (89 % et 25 % contre
-  90 % et 26 %). Règle : **nous moyennons ce que nous montrons** — divergence
-  assumée, elle corrige. Les moyennes de groupes tombent juste des deux côtés.
-- **La période de présence d'un député se lit dans `fonction_groupe`, jamais
-  dans `mandat`.** L'Assemblée ne garde qu'un mandat par siège et **remplace**
-  l'ancien au lieu de l'archiver : Thierry Liger n'a qu'un mandat pris le
-  22/04/2026 et cinquante votes solennels dès février 2025 ; Patrick Hetzel un
-  mandat couvrant toute la législature alors qu'il était ministre d'octobre à
-  janvier. 26 députés de la 17e ont des votes hors de leur mandat déclaré — six
-  sortaient à plus de 100 % de participation. Le rattachement de groupe, lui,
-  se referme et se rouvre à chaque aller-retour : c'est sur lui que reposent,
-  depuis le 30 juillet, la participation (bornes de présence) comme la loyauté
-  (rattachement le plus récent, principal, votes bornés à ses dates —
-  68 des 645 votants de la 17e perdaient toute leur loyauté quand elle se
-  calculait sur `depute.groupe_id`, cf. le piège de `CLAUDE.md`).
-- **Participation aux solennels : le non-votant sort du dénominateur.**
-  Présider la séance ou siéger au Gouvernement interdit de voter — ce n'est pas
-  une absence (Braun-Pivet, non-votante sur 49 des 72 solennels, vaut 23/23 :
-  100 %, rang 16, comme le site). L'exception `PA721908` en dur de
-  `daily.php:2306-2318` n'est **pas** reprise : notre base reçoit ces scrutins
-  en `nonVotant` (72 lignes pour 72 solennels, aucun trou), le cas général
-  couvre le cas particulier et survivra au prochain président — consigné dans
-  le docblock de `CalculClassementsCommand`.
-- **« Votes par spécialisation » : trois écarts assumés face au site, aucun à
-  « réparer ».** Le troisième score de participation (livré le 4 août :
-  `dossier.commission_fond` depuis l'acte AN1-COM-FOND, types
-  `deputes/groupes_participation_commission`, onglet sur les deux pages) sort
-  les mêmes têtes de classement et les mêmes scores à ±1 point que datan.fr,
-  mais : nos « nombre de votes » dépassent les siens de ~3 % — sa table
-  `votes_participation_commission` est incrémentale et jamais revisitée, un
-  scrutin rattaché à son dossier après coup lui échappe pour toujours, quand
-  notre recalcul le voit (8 243 scrutins couverts contre ~7 275) ; son tableau
-  des députés liste 584 lignes pour 577 sièges — neuf réélus y figurent en
-  double, sa jointure ne filtrant pas la législature (défaut corrigé) ; et la
-  présidente de l'Assemblée apparaît chez nous, pas chez lui (exception
-  `PA721908` non reprise, comme pour les solennels). Détail dans le docblock de
-  `CalculClassementsCommand::participationCommission`.
-- **L'égalité de rang d'un groupe se juge sur le score stocké, un
-  `decimal(6,3)`.** Le `RANK()` d'origine porte sur `class_groups.value` : deux
-  groupes séparés à la quatrième décimale sont ex æquo pour le site (UDDPLR et
-  GDR au rang 3, EPR et DEM au rang 6). Juger sur le flottant brut les
-  séparait. Les rangs stockés des députés portent désormais eux aussi des
-  ex æquo (1, 1, 1, 4…) — sans effet à l'affichage, le contrôleur recalculant
-  sur les entiers, mais visible en interrogeant la table.
-- **L'indice de Rose du site perd ses artisans, pas le nôtre — divergence
-  choisie.** `famsocpro` écrit « Artisans, commerçants et chefs d'entreprise »,
-  l'open data « Artisans, commerçants, chefs d'entreprises » : l'appariement à
-  égalité stricte du legacy fait disparaître les 41 artisans de la 17e du
-  calcul (ni numérateur ni dénominateur) quand son propre tableau croisé les
-  affiche. Retirer nos artisans reproduit le site au millième (LFI 0,432,
-  RN 0,403, sept groupes sur onze) : cause démontrée, docblock à l'appui. Des
-  députés bien classés valent mieux que la parité au chiffre — nos scores
-  restent un à quatre centièmes au-dessus, et c'est une ligne à changer si la
-  parité stricte est préférée un jour.
-- **Un non-votant s'affiche « abstention » dans les positions importantes, mais
-  la comparaison au groupe se fait sur la position brute.** Le comportement du
-  legacy est un accident heureux : `CASE WHEN vs.vote = 0` compare un varchar à
-  un entier, MariaDB convertit `'nv'` en 0 → « abstention », et le
-  `scoreLoyaute` reste NULL → « n'a pas voté comme son groupe ». Notre
-  `ComportementDepute` reproduit le résultat proprement : la normalisation ne
-  touche que l'affichage — la décider sur la position normalisée ferait passer
-  pour loyal un non-votant dont le groupe s'est abstenu.
-- **La moyenne de proximité à la majorité du site (46 %) sort d'une
-  auto-jointure sans garde** : le couple (RE, RE) vaut 1, la majorité pèse
-  ~100 % dans sa propre moyenne. Reproduit à contrecœur (le chiffre propre
-  serait 51 %), commenté dans le code — c'est une parité, pas une erreur à
-  « réparer ».
-- **La page statistiques d'un groupe recalcule à la volée ce que le site
-  précalcule la nuit** (sept tables `class_groups*` / `groupes_*_history` que
-  nous n'avons pas) : tout sort de `vote_groupe`, `fonction_groupe` et
-  `depute`, le cache HTTP tenant lieu de précalcul. Si cette page devient
-  lente à froid, c'est ici — et la réponse est un précalcul, pas un
-  appauvrissement de la page.
-- **`datetime-moment.js` se charge APRÈS `datatable-datan.min.js`, jamais avant.**
-  C'est un greffon de DataTables : il pose `$.fn.dataTable.moment`. Chargé avant
-  la bibliothèque il échoue en silence, puis l'initialisation de
-  `data-table-datan.js` meurt sur un `TypeError` — et **toutes** les tables de la
-  page perdent recherche, tri et pagination sans la moindre trace côté serveur.
-  `/votes/legislature-17` rendait ainsi ses 8 434 lignes d'un bloc, et les
-  **neuf pages de classement** perdaient recherche et tri d'un seul coup.
-  **Trois** gabarits avaient l'ordre inversé — `vote/all`, `parrainages/index`
-  et `classement/_layout` —, corrigés le 29 juillet ; `groupe/votes_tous` et
-  `depute/votes` étaient justes. **`vote/individual` n'avait, lui, ni l'un ni
-  l'autre** : ses deux tables de scrutin (groupes, députés) sortaient sans tri
-  ni recherche sur **toutes** les pages de vote, l'initialisation mourant sur
-  `$.fn.dataTable.moment` introuvable — variante muette du même défaut, trouvée
-  le 4 août en comptant les `dataTables_wrapper` du DOM rendu (`chrome
-  --headless --dump-dom`, 0 attendu 2). Le symptôme ne ressemble pas à une
-  erreur de script : la page s'affiche, simplement sans ses commandes. Le
-  défaut ayant été trouvé quatre fois indépendamment, le vérifier reste le
-  premier réflexe devant un tableau sans barre de recherche — et le compte des
-  `dataTables_wrapper` le tranche sans ouvrir un navigateur.
-- **La composition d'une législature achevée est incomplète dans notre source.**
-  La phrase « il y avait à l'Assemblée nationale N hommes et M femmes » compte,
-  comme le legacy, les mandats dont la prise de fonction est le **jour
-  d'ouverture** (`Legislature::ouverture()`) — et non les 618 à 651 personnes qui
-  ont siégé, qu'affichait notre première version. Mais notre source n'en porte
-  que 567 pour la 16e, 560 pour la 15e, 543 pour la 14e, là où datan.fr tombe
-  chaque fois sur les **577 sièges**. L'écart croît avec l'ancienneté : signature
-  d'un jeu de données de l'Assemblée qui remplace les mandats invalidés
-  (annulations, ministres jamais installés) au lieu de les conserver, quand le
-  legacy garde son instantané de l'époque. Les proportions, elles, tombent juste
-  aux 15e et 16e (61/39 et 63/37) et divergent de deux points à la 14e. Reprendre
-  les mandats depuis un instantané ancien serait le seul remède — pas un défaut
-  de portage.
-- **Un slug de département en casse mixte doit répondre, pas rendre 404.**
-  `/deputes/corse-du-sud-2A`, `/deputes/NORD-59`,
-  `/deputes/corse-du-sud-2A/ville_ajaccio` répondent 200 sur datan.fr — routeur
-  CodeIgniter permissif, collation MariaDB indifférente à la casse. Plutôt que
-  de servir la même page sous une infinité d'adresses, les motifs acceptent
-  désormais les majuscules et les quatre contrôleurs **redirigent en 301** vers
-  l'orthographe de `departement.slug`. Les exclusions `legislature-` et
-  `inactifs` ont dû être rendues insensibles à la casse, sans quoi elles volent
-  leurs routes à `DeputeListController`.
-- **Décoder les entités HTML APRÈS la troncature d'un extrait, jamais avant.**
-  `strip_tags()` ôte les balises mais laisse les `&nbsp;`, que l'échappement de
-  Twig rendait ensuite en toutes lettres. Le `word_limiter` du legacy compte
-  `&nbsp;Si` comme **un** mot, deux une fois décodé : décoder d'abord
-  déplacerait les frontières et changerait les 18 extraits du blog.
-- **Les trois méta-descriptions sortent en `|raw`, et l'équation est calibrée.**
-  Le bloc `meta_description` est échappé une fois par l'autoéchappement de
-  Twig ; le `|trim` de la coque perd le marquage « safe » (mesuré : le passage
-  par une variable suffit aussi), donc l'insertion ré-échappait. Le `|raw`
-  supprime le second échappement, pas le premier — l'audit des 49 blocs le
-  garantit (aucun `|raw`, aucun HTML, aucune entité en dur dedans), et
-  **l'équation tient tant qu'aucun bloc n'injecte du contenu non échappé**. La
-  clé `ogp.description`, qu'aucun contrôleur ne renseigne encore, s'échappe à
-  la source pour arriver dans le même état que la branche du bloc.
-- **Adjacence des communes : 6 388 couples écartés est le chiffre nominal.**
-  6 342 portent sur 1 559 communes fusionnées que le référentiel ne connaît
-  plus (Maine-et-Loire, Calvados, Manche, Orne en tête), 46 sur neuf communes
-  sans circonscription — les six villages détruits de Verdun, Sannerville,
-  L'Oie, Sainte-Florence. Le total ferme à l'unité :
-  218 852 = 212 464 + 6 388. Et **279 communes sans aucune voisine est
-  correct** : 224 villes de l'étranger (099), 55 îles. Si ces chiffres bougent,
-  c'est l'import qui a régressé. L'index PHP se fait en minuscules et
-  l'orthographe rendue est celle de la base — même modèle
-  qu'`ImportResultatsElectorauxCommand`, qui faisait déjà bien.
-- **Des « HTTP 000 » par centaines d'affilée = ports éphémères de Windows
-  épuisés**, pas un site en panne : des connexions en rafale sans réutilisation
-  vident la plage locale. Rejouer sur connexion persistante. À ranger avec les
-  faux 500 du banc multi-`php -S` de `CLAUDE.md` : des anomalies par tranches
-  contiguës accusent l'outillage, jamais le site.
-- **`|default()` remplace aussi les valeurs vides : `false|default(true)` rend
-  `true`.** Pour un booléen venu de la requête (`?secondary-title=hide`), le
-  repli s'écrit `is defined`, jamais `|default()` — le titre de l'iframe
-  restait affiché malgré le paramètre, et seule la capture l'a montré.
-- **L'espace connecté profond est comparé sur le code, pas sur capture.** Mon
-  compte, tableau de bord du député et espace de rédaction n'ont pas de compte
-  sur la production : leur parité (passe du 30 juillet) est établie contre les
-  vues et contrôleurs de `../datan`, rendues sous session locale. Une
-  divergence entre le code du legacy et ce que sert réellement datan.fr y
-  passerait inaperçue.
-- **`/admin/socialmedia/{page}` n'accepte que six valeurs nommées**
-  (`deputes_entrants`, `deputes_sortants`, `postes_assemblee`,
-  `groupes_entrants`, `historique`, `x`) : un `{page}` numérique répond 404
-  par construction — à savoir avant de conclure à une page cassée.
-- **L'iframe est un document autonome.** Elle n'hérite de rien de
-  `base.html.twig` : la police manquait, et le navigateur du tiers retombait sur
-  une sérif locale, ce qui change toute l'allure de l'embarqué. Même bloc
-  `@font-face` que la coque, comme le `_header_iframe.php` du legacy. Toute
-  déclaration globale ajoutée à la coque est à répercuter ici.
-- **`iframe/_positions.html.twig` est une copie de celui de la fiche.** Le
-  legacy charge le même partial dans les deux contextes, deux conditions
-  internes suffisant à couvrir l'embarqué ; nous ne pouvions pas le faire sans
-  toucher au périmètre de la fiche, d'où deux fichiers. Une retouche de
-  `depute/_positions.html.twig` est à répercuter — l'en-tête du fichier le dit,
-  mais rien ne l'impose.
-- **`?first-person=true` est mort sur datan.fr, pas chez nous.** Le cache de
-  sortie de CodeIgniter est aveugle à la chaîne de requête : la page d'iframe y
-  est servie octet pour octet identique avec et sans le paramètre (même MD5,
-  46 172 o). Le code du legacy implémente pourtant bien la 1re personne, et
-  c'est elle que nous rendons — divergence volontaire avec ce que le site
-  *affiche*, parité avec ce qu'il *dit*.
-- **Corrections typographiques assumées, à ne pas « ré-aligner » sur le site.**
-  Virgule décimale (`0,86` contre `0.86` — cohésion des pages de groupe
-  comprise depuis le 4 août), « Assemblée nationale » en minuscule là où deux
-  titres du legacy capitalisent, accords et coquilles des mentions légales,
-  « à la Réunion » contre « à la La Réunion », élision « d'Ajaccio », et
-  l'espace avant le point de « … le 23 janvier 2025 . » sur la fiche d'un
-  ancien député.
-  Chacune porte son commentaire dans le gabarit : sans lui, le prochain lecteur
-  y voit une erreur de portage et « répare » dans le mauvais sens.
-- **Deux phrases à trou du legacy ne sont pas reproduites.**
-  `/partis-politiques/<abrev>`, pour un parti sans député, publie
-  « Actuellement, député est rattaché » — un `if` refermé trop tôt ;
-  `/groupes/legislature-17/ni` publie « le groupe NI est le e plus gros
-  groupe », les non-inscrits n'ayant pas de rang. Dans les deux cas on retombe
-  sur la phrase que le site sert quand sa donnée est là. Commenté sur place.
-- **Des assets manquent sur datan.fr, pas chez nous.** Deux logos de partis
-  (REZRE, DEBOU), deux vignettes d'articles (posts 7 et 9, dont l'`image_nom`
-  est pourtant identique des deux côtés) et deux portraits de députés inactifs
-  (Brigitte Barèges, Pauline Levasseur — avec les 404 correspondants dans les
-  journaux du legacy) s'affichent chez nous et pas là-bas. Ne pas prendre ces
-  écarts pour une régression : c'est le site de référence qui est incomplet.
-- **Les cartes en vis-à-vis des statistiques ne montrent pas toutes le premier
-  du classement.** Quatre blocs sur cinq présentent le **dernier** à gauche
-  (« Le plus divisé », « Vote le moins », « Le moins de cadres », « Le moins
-  représentatif ») ; seul l'âge met le premier. Le sens appartient à l'appel, pas
-  au gabarit — ne pas uniformiser. De même, cinq des neuf libellés du menu
-  latéral diffèrent du titre de la page qu'ils ouvrent (« La proximité au
-  groupe » pour « La proximité des députés à leur groupe ») : d'où un tableau
-  `MENU` distinct des titres.
-- **Les non-inscrits comptent en participation de groupe, pas en cohésion.** La
-  page de participation les garde dans ses cartes — ils y arrivent derniers à
-  75 % — quand celle de cohésion les écarte. Les exclure des deux faisait
-  remonter GDR à leur place. Incohérent, mais c'est la règle du site.
-- **Un groupe rebaptisé en cours de législature dédouble ses coalitions — et
-  le recollage se borne à UDR→UDDPLR.** Sans recollage, la coalition
-  principale d'EPR comptait 777 scrutins au lieu de 1 183. Le site ne recolle
-  qu'**une** filiation (`clean_libelleAbrev()`, daily.php:4580) : depuis le
-  30 juillet, `GroupeController::SIGLES_CANONIQUES` fait de même. Ne pas
-  regénéraliser à `FamilleGroupe` : SOC et SOC-A restent distincts en 16e,
-  leurs coalitions se scindent au 19/10/2023 avec le badge SOC sur les lignes
-  d'avant — vérifié, c'est ce qu'affiche datan.fr. Quant au 1 184e scrutin du
-  site, il est élucidé et **irréductible** : `coalitions_groupes` est une
-  table jamais vidée — `INSERT … ON DUPLICATE KEY UPDATE` sans suppression, un
-  scrutin qui cesse de qualifier y laisse sa ligne pour toujours. Le compte du
-  site est une accumulation monotone, nécessairement supérieure ou égale à un
-  recalcul propre : 1 183 est le chiffre juste.
-- **API Platform expose en écriture par défaut.** Toute nouvelle entité
-  `#[ApiResource]` doit déclarer `operations: [new Get(), new GetCollection()]` ;
-  les deux règles d'`access_control` rattrapent (en 500) celle qui l'oublierait.
-  À revérifier à chaque entité exposée — le défaut est ouvert, pas fermé.
-- **L'encart « dernier vote important » de la fiche est codé en dur.** Comme le
-  legacy (`Deputes::index`), `DeputeController::voteFeature` pointe un scrutin
-  figé — 17e législature, n° 3684 (suspension de la réforme des retraites) — et le
-  texte de `_vote_feature.html.twig` est éditorial. Quand la rédaction met un autre
-  vote en avant, ces deux points changent ensemble ; seule la position du député y
-  est dynamique.
-- **Le backup public est un instantané daté.** Toute parité — URL, effectifs,
-  comptes, décryptages — se vérifie contre le site **vivant** : `deputes_last` y
-  portait un slug que datan.fr ne sert plus (Roubache). Deux écarts persistants
-  en relèvent, et **aucun n'est un défaut de portage** :
-  - **Christine Le Nabour** est EPR chez nous (son seul rattachement ouvert,
-    donc le calcul est juste) et HOR sur le site. D'où EPR 91 contre 90, HOR 35
-    contre 36, 45 femmes EPR contre 44, ESBMP 114 contre 113 — visible sur la
-    féminisation (HOR passe du 6e au 8e rang), le simulateur de coalition, la
-    représentativité, et le classement de loyauté qui compte 577 lignes contre
-    ses 576 (elle est la ligne en plus). Une moisson Tricoteuses le résoudra ;
-    les deux côtés totalisent bien 577.
-  - ~~Deux décryptages de juillet 2026 manquants~~ **résorbé, vérifié le
-    4 août** : notre table est alignée à l'unité sur le backup du 15/07
-    (250 = 250, acétamipride et aide à mourir compris, zéro écart dans les
-    deux sens). Le rejeu contre la vraie base au déploiement (§2) reste dû :
-    la rédaction a pu publier depuis le 15/07.
-- **Saint-Barthélemy / Saint-Martin interchangeables** dans la source
-  électorale (977/978), sans moyen de trancher : l'import émet un `[WARNING]`
-  nommant les deux communes — chiffres à vérifier avant publication.
-- **592 lignes de résultats électoraux écartées** (communes fusionnées depuis
-  le scrutin) : chiffre à surveiller — s'il gonfle, c'est `app:import:communes`
-  qui a régressé, pas la source.
-- **L'historique mensuel de proximité ne pondère pas par le nombre de
-  scrutins** : un mois à un seul scrutin vaut 0 ou 100 % (septembre 2025).
-  Parité assumée avec datan.fr ; la correction serait un seuil, donc une
-  divergence délibérée à consigner. Ne pas confondre avec les trous des
-  courbes (`spanGaps: false`), eux volontaires.
-- **Cadence des mandats en organe** : `fonction_commission` (COMPER) se
-  recharge par `app:import:commissions`, **hors sync**, quand les délégations
-  (`app:import:organes`) y sont — quirk assumé ; si l'écran « Postes
-  Assemblée » dérive entre ses deux moitiés, c'est là.
-- **Jamais d'auto-publication IA.** Le brouillon de décryptage et les résumés
-  d'amendements proposent, la rédaction dispose — le décryptage est la seule
-  donnée que Datan produit.
-- **Un import complet est mort une fois sans message** (22 juillet), signature
-  du `cache:clear` concurrent de CLAUDE.md, non reproduit depuis. À rouvrir
-  s'il récidive hors de cette circonstance.
-- **L'Assemblée publie parfois `PO0` en guise d'`organeRef`** dans la ventilation
-  d'un scrutin — quatorze fois sur la 17e : les scrutins 489 et 491 à 501 du
-  2 décembre 2024, où **tous** les groupes le portent, plus un bloc isolé sur
-  les scrutins 1302 et 6256. Rien sur les législatures 14 à 16, et les
-  Tricoteuses recopient le fichier tel quel : la correction nous revient.
-  `ImportScrutinsCommand` reconstitue les 146 blocs en deux temps — le groupe
-  des votants du bloc quand il en a (134), l'élimination des groupes déjà placés
-  quand il est muet (12). Les quatorze scrutins se referment sur leur synthèse
-  et totalisent les mêmes 574 sièges que le scrutin 490, voisin épargné du même
-  jour. **À surveiller** : si la source récidive avec plusieurs blocs muets aux
-  effectifs voisins, l'élimination renoncera au scrutin entier plutôt que de
-  placer au jugé, et le dira en fin d'import.
+## P1 — Statistiques : écarts de calcul à instruire un par un
+
+Pour chacun : comprendre la règle du legacy (la réponse est dans son code, souvent
+`daily.php`), puis trancher parité/correction et **commenter le choix** dans le code.
+
+- [ ] **Participation moyenne 89 % (legacy) vs 90 % (staging)** — même total de
+  8 434 scrutins annoncé des deux côtés, donc écart de calcul, pas de fraîcheur.
+  Lié au point suivant.
+- [ ] **Dénominateur « nombre de votes » du tableau « Tous les votes »** : uniforme
+  à 8 411 côté staging pour un député présent toute la législature, variable côté
+  legacy (8 402 / 8 405 / 8 408 selon le député). Trouver ce que le legacy retranche
+  (scrutins pendant la période d'activité ? exclusions ponctuelles ?) avant de
+  décider qui a raison. 568 lignes sur 576 diffèrent, 5 pourcentages bougent de ±1 pt.
+- [ ] **Tableau « Votes par spécialisation »** : legacy 583 lignes (9 députés en
+  double — une ligne par commission —, Braun-Pivet absente), staging 575 (dédoublonné,
+  Braun-Pivet réintégrée) ; 463 pourcentages sur 574 diffèrent, certains massivement
+  (Clémence Guetté 89 % → 25 %). Deux causes à séparer :
+  1. le dédoublonnage (commission dominante) — probablement une correction à assumer ;
+  2. le périmètre « votes liés à la commission », systématiquement plus large côté
+     staging (298→308, 1422→1602, 1774→2369…) : le legacy scrape le lien
+     scrutin↔dossier sur assemblee-nationale.fr (couverture partielle). Documenter la
+     source de chaque côté et choisir.
+- [ ] **Graphique « évolution du taux de députées femmes »** : le staging supprime la
+  barre 1997-02 et scinde 2022-27 en 2022-24 (37 %) / 2024-29 (38 %), ce qui inverse
+  la phrase dynamique (« a légèrement baissé » → « augmenté »). Le libellé legacy
+  « 2022-27 » est faux depuis la dissolution, mais l'écart visuel est important :
+  trancher, et si le découpage staging est gardé, le commenter comme correction.
+- [ ] **Représentativité sociale** : LIOT 0.107 → 0,142 ; LFI-NFP 0.432 → 0,446 ;
+  et sur la fiche DEM la catégorie à 0 % diffère (« ouvriers, 11 % » vs « personnes
+  n'ayant jamais travaillé, 13 % »). Comparer la nomenclature des catégories et le
+  calcul de l'indice.
+- [ ] **Cohésion** : moyenne 0.927 → 0,925 ; DR 0.899 → 0,898 (les 11 autres groupes
+  strictement identiques — probable écart d'arrondi ou de périmètre marginal).
+- [ ] **Avertissement Covid-19** (« Attention, à cause de la crise de la Covid-19… »)
+  supprimé côté staging : probablement obsolète, mais décider et documenter.
+- [ ] **Départage des ex æquo** (top 3 participation à 100 %, carte « Vote le plus »,
+  fins de classement) : le legacy a-t-il un tri secondaire reproductible ? Si oui le
+  reproduire, sinon en poser un déterministe et le commenter.
+
+## P1 — Page /elections et pages résultats
+
+- [ ] **Bug de gabarit des cartes d'élection** : valeur nulle rendue en chaîne vide
+  avec bascule de libellé — Municipales : « 337 députés candidats » (legacy) →
+  «  député élu » (staging) ; Présidentielle : « 0 député élu » → «  député élu ».
+  Afficher le bon chiffre (les candidatures municipales ne sont pas importées :
+  décider quoi afficher en attendant) et le bon libellé, ne jamais rendre vide.
+- [ ] **Section « Les prochaines élections en France » absente** du staging.
+  Le texte legacy est périmé (dates de mars 2026 au futur) : reconstruire la section
+  avec un contenu juste plutôt que la laisser tomber.
+- [ ] **Second tour d'Ambérieu-en-Bugey (législatives 2024)** : le legacy affiche
+  « pas de second tour », le staging des résultats complets (Chavent 51,27 % /
+  Pisani 48,73 %). Chavent n'avait que 36,47 % au T1 : le staging semble avoir
+  raison. Vérifier contre la source, puis commenter comme correction d'un défaut de
+  données du legacy (ou corriger si c'est l'inverse).
+- [ ] **Top 30 des plus grandes communes** : le staging insère Saint-Denis de La
+  Réunion (20e), le legacy l'exclut. Retrouver le critère legacy (exclusion
+  outre-mer ? population différente ?) et s'aligner ou assumer.
+- [ ] **Casse des noms de candidats** : legacy « Marc CHAVENT », staging
+  « Marc Chavent ». Choix d'affichage à trancher (parité = capitales).
+- [ ] **Habillage municipales 2026 des pages résultats** (title/h1/meta « Élections
+  municipales 2026 dans l'Ain ») : différence assumée tant que les municipales ne
+  sont pas portées — à réévaluer si le périmètre change. Rien à faire pour l'instant.
+
+## P2 — Sitemaps
+
+- [ ] **Ajouter au sitemap structure les 7 pages fixes manquantes** : `/a-propos`,
+  `/faq`, `/mentions-legales`, `/soutenir`, `/parrainages-2022`,
+  `/outils/coalition-simulateur`, `/blog` (toutes répondent 200 ; le legacy les
+  annonce ; le site vit de son référencement).
+- [ ] **Zéro-padder les mois des archives** dans le sitemap : annoncer
+  `/votes/legislature-17/2026/07`, pas `/2026/7`. Les deux formes répondent 200 sans
+  canonical commun → au passage, faire pointer le canonical des deux formes vers la
+  forme zéro-paddée (celle indexée depuis des années).
+- [ ] **`ville_0` disparaîtra du sitemap** avec la correction P0 — vérifier.
+- [ ] Extensions assumées du sitemap staging (groupes NI, `/commissions`,
+  `/legislature-N`, inactifs L14-16, `/votes/all` retirés des inactifs) : rien à
+  faire, mais vérifier par échantillon que tout ce qui est annoncé répond 200.
+
+## P2 — Typographie et casse transverses
+
+- [ ] **Séparateur décimal** : le staging affiche la virgule (0,86 ; 4,4 %) là où le
+  legacy affiche le point (0.86 ; 4.4 %) — systématique (statistiques, cohésion,
+  évolutions de population). La virgule est le bon usage français mais s'écarte de la
+  parité : trancher une fois pour tout le site et commenter. (Incohérence actuelle :
+  « 51.7 ans » garde le point des deux côtés.)
+- [ ] **« Polynésie Française » → « Polynésie française »** : la règle de
+  capitalisation du staging surcorrige un adjectif ; le legacy avait raison ici.
+  Régression à corriger dans le formateur de noms de départements.
+- [ ] Capitalisations gardées (« Val-d'Oise », « Côtes-d'Armor », « 2A »/« 2B ») :
+  corrections assumées du legacy — vérifier juste qu'un commentaire le dit.
+
+## P2 — Divers pages et gabarits
+
+- [ ] **Boutons de l'accueil** « Voir les derniers votes » / « Tous les votes » :
+  staging → `/votes/legislature-17`, legacy → `/votes`. Aligner sur `/votes` (parité,
+  et c'est l'URL du menu).
+- [ ] **Meta description des pages d'archives mensuelles** : remettre la spécificité
+  du mois (« en juin 2024 ») au lieu de la description générique de législature.
+- [ ] **Section campagne de dons (`#campaign`)** : inclusion incohérente — absente de
+  `/votes` côté staging (présente côté legacy), présente sur les pages mois côté
+  staging (absente côté legacy), position différente sur les pages commune. Décider
+  la liste des pages porteuses et l'emplacement, puis harmoniser.
+- [ ] **Camembert « Résultat du vote »** : étiquette « 113 » affichée dans la part
+  verte côté staging, aucune côté legacy. Retirer l'étiquette.
+- [ ] **Bouton « Le dossier »** : icône de lien externe manquante côté staging.
+- [ ] **Bulle d'aide « ? »** du titre « Les coalitions les plus fréquentes »
+  manquante côté staging.
+- [ ] **Ordre des logos** dans « La position des groupes » (fiche vote) : le tri
+  legacy est un choix — le retrouver et le reproduire.
+- [ ] **Badges des coalitions** triés alphabétiquement côté staging, ordre politique
+  côté legacy : reproduire l'ordre legacy.
+- [ ] **Tooltip hémicycle** : « Députés non inscrits (NI) » (legacy) vs
+  « Non inscrit (NI) » (staging).
+- [ ] **h2 de `/votes`** : « Derniers votes non-decryptés de l'Assemblée nationale »
+  (legacy, inexact et coquillé) vs « Les derniers votes de l'Assemblée nationale »
+  (staging). La reformulation est défendable : garder, mais commenter pourquoi.
+- [ ] **Placeholder des photos de députés** pendant le chargement : pictogramme
+  « personne » (legacy) vs cercle dégradé vide (staging). Cosmétique, visible sur
+  les grilles.
+- [ ] **Position du % gagnant** dans l'encadré « Son élection » (fiche député) :
+  aligné différemment ; et le lien « Consultez les résultats complets » n'est plus
+  souligné. Deux détails de CSS à reprendre.
+- [ ] **Icône « Proximité avec son groupe »** (poignée de main) : graisse différente.
+- [ ] **Liste « Les autres députés RN »** de la fiche Buisson : sélection différente
+  (legacy : Barthès, Bordes ; staging : Bovet, Casterman). Retrouver le critère de
+  sélection du legacy (aléatoire ? alphabétique ? même département ?).
+- [ ] **« Il vote rarement avec »** (fiche Buisson) : trois groupes ex æquo à 19 %,
+  le texte legacy cite ECOS, le staging LFI-NFP. Même chantier que le départage
+  d'ex æquo des statistiques.
+- [ ] **Fiche groupe DEM, texte de présentation** : le staging a un paragraphe
+  enrichi absent du legacy, terminé par un « .. » (double point). Corriger la
+  ponctuation ; décider si le texte enrichi reste (il vient probablement de la base
+  de rédaction — dans ce cas c'est le legacy qui est en retard).
+- [ ] **Candidats municipales fiche DEM** : « 21 députés candidats » (legacy) vs
+  « 18 » (staging). Même famille que les données municipales non importées :
+  vérifier la source du compteur.
+
+## P2 — Performance et SEO techniques
+
+- [ ] **Remettre les `<link rel=preload>`** des images de couverture
+  (`/assets/imgs/cover/hemicycle-front{-375,-768,}.jpg`) sur les pages qui les
+  avaient (département, a-propos, mentions-legales, soutenir…) : LCP.
+- [ ] **Alt des vignettes blog** : « Image post 15 » vs « Image post 26 » — l'ID
+  auto-incrémenté diffère entre bases. Sans gravité, mais un alt parlant (titre de
+  l'article) réglerait la question mieux que la parité.
+- [ ] **Troncature meta description des articles** : coupe un mot plus tôt que le
+  legacy (l'entité `&nbsp;` compte 6 caractères chez lui). À ignorer sauf si l'on
+  vise l'octet près.
+
+## Checklist de bascule (rien à coder, à dérouler le jour J)
+
+- [ ] Rejouer les imports de récupération contre la **vraie** base de production
+  (comptes, explications, décryptages, blog) — jamais depuis le backup anonymisé.
+- [ ] Rebrancher **Matomo** (matomo.datan.fr, siteId 1) et **GTM** (GTM-K3QQNK2) —
+  absents du staging, vraisemblablement à dessein.
+- [ ] Vérifier que canonical/og:url basculent bien sur datan.fr (générés depuis
+  l'hôte : automatique, mais vérifier).
+- [ ] Vérifier les images `posts/inside/` (cf. P1) une fois le domaine basculé.
+- [ ] Rejouer une passe de vérification du sitemap : chaque URL annoncée → 200
+  (le critère de `SitemapController` se vérifie en interrogeant réellement).
+
+## Différences assumées — ne PAS « corriger » (consignées pour mémoire)
+
+- Participation des groupes sur la fiche vote (DR 15→17 %, EPR 13→14 %) : correction
+  documentée du bug legacy des non-votants (`App\Groupe\ParticipationGroupe`).
+- Badges d'explication de vote « -1/1 » → « POUR/CONTRE » stylés (le legacy rendait
+  la valeur brute non stylée).
+- Coquilles corrigées (« Découvez », « présiedent », « vigeur », « consenement »,
+  « Assemblée national », « ralantissant », mojibake « JÃ©rÃ´me »…), élisions
+  (« d'Ajaccio »), « 15ème législature » figée, h1 vide des Français de l'étranger,
+  « 0 député » affiché, année de copyright du login.
+- Liens morts legacy remplacés : `/cookiespolicy` → `/mentions-legales`,
+  `recherche.php` → géré en JS, rubriques blog « rapports » en dur → vraie rubrique,
+  phrase « cliquez ici » à `href="#"` supprimée sur `/votes/decryptes/environnement`.
+- Communes à parenthèses accessibles (le legacy les liait mais les refusait en 400).
+- Ajouts : pages `/commissions`, API Platform lecture seule sous `/api`, pages
+  `/legislature-N`, listes historiques de groupes, sitemap inactifs étendu L14-16.
+- Recherche : votes triés par récence + filtre `state='published'` (documenté dans
+  `SearchController`, faute d'index FULLTEXT équivalent au MATCH legacy).
+- Municipales 2026 et tables `elect_bv_*` : chantier en cours du legacy,
+  délibérément hors périmètre (cf. CLAUDE.md).
+- Emails en clair et absence d'obfuscation Cloudflare : infrastructure, pas
+  l'application.
+
+## Reste à vérifier (couverture incomplète de la campagne du 2026-08-08)
+
+- [ ] Trois sections n'ont pas eu leur comparaison HTML fine (agents interrompus) :
+  **sous-pages groupes** (`/membres`, `/statistiques`, `/votes`, groupe dissous
+  ecolo L14, groupe NI), **fiche d'un vote décrypté** (texte du décryptage, votes
+  similaires), **fiche député en HTML** (JSON-LD, liens sociaux). Elles ont été
+  couvertes par la comparaison visuelle et des sondages ciblés (`/groupes`,
+  vote_1 L16, vote_1243 L16 : conformes hors points déjà listés), mais une passe
+  HTML complète reste à faire.
+- [ ] Rejouer la comparaison des pages touchées après chaque correction ci-dessus
+  (une URL à la fois côté datan.fr, cf. rappel 429 en tête de fichier).

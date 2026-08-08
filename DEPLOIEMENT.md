@@ -361,8 +361,17 @@ racine du projet exposerait `.env`, `var/` et `vendor/`.
 
 ## 5. Cron
 
-`CRON.md` porte le détail et les justifications. À l'installation, trois entrées
-suffisent — en adaptant `/var/www/datan` en `/var/www/datan/current` :
+La table à poser est **`bin/crontab.prod`** — chemins et nom de base en tête de
+fichier, à ajuster avant :
+
+```bash
+crontab /home/wqktajhw/datan/bin/crontab.prod
+crontab -l                                     # relire ce qui est installé
+```
+
+`CRON.md` porte le détail et les justifications. L'extrait ci-dessous en donne
+l'essentiel, **mis en forme pour la lecture** : cron arrête la commande à la fin
+de la ligne, ne pas le copier tel quel.
 
 ```cron
 # Quotidien — 6 h. Une seule entrée : l'ordre est garanti par &&, et la purge du

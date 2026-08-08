@@ -22,15 +22,20 @@ source est fraîche, et la base est à jour au réveil.
 
 | Commande | Rôle | Durée |
 | --- | --- | --- |
-| `app:sync:quotidien` | Moisson + 10 étapes d'import, dans l'ordre des dépendances | ~50 s à vide |
+| `app:sync:quotidien` | Moisson + 11 étapes d'import, dans l'ordre des dépendances | ~50 s à vide |
 | `app:import:commissions` | Mandats COMPER (25 000 lignes) — hors chaîne, mais lit le **même delta** | quelques s |
 | `app:calcul:statistiques-deputes` | Participation, loyauté, proximité par groupe de la fiche député | ~15 s |
 | purge `var/cache/prod/http_cache` | Les pages sont en cache une heure ; on repart propre pour que les nouveaux scrutins soient visibles tout de suite | — |
 
 `app:sync:quotidien` déroule lui-même, dans cet ordre : moisson des dépôts,
-acteurs, organes hors table dédiée, profils sociaux, photos, dossiers,
-amendements, scrutins, comptes rendus, rattachement scrutin → amendement,
-classements. Rien à planifier séparément là-dedans.
+acteurs, organes hors table dédiée, profils sociaux, photos, **détourage des
+photos**, dossiers, amendements, scrutins, comptes rendus, rattachement
+scrutin → amendement, classements. Rien à planifier séparément là-dedans.
+
+Le détourage suit la publication des photos parce qu'il en dépend : il ne
+retraite que ce que l'étape précédente vient d'écrire, et coûte le temps d'un
+`filemtime()` par portrait déjà fait. Un premier passage sur les 647 portraits
+prend 12 s.
 
 Les deux commandes qui la suivent **ne sont pas dans la chaîne à dessein** —
 ce sont des précalculs qu'on lance sciemment — mais elles se périment dès qu'un
@@ -57,6 +62,12 @@ les deux lignes du tableau ci-dessus sont à y ajouter le jour où on les
 planifie.
 
 ### Serveur (crontab)
+
+La table réellement installée est **`bin/crontab.prod`** (`crontab
+bin/crontab.prod`) : elle porte aussi la sauvegarde, le consommateur Messenger
+et la rotation des journaux. L'extrait ci-dessous est mis en forme pour la
+lecture — **cron arrête la commande à la fin de la ligne**, la continuation par
+antislash n'est pas garantie d'une implémentation à l'autre.
 
 ```cron
 # Mise à jour quotidienne — 6 h. Une seule entrée : l'ordre est garanti par &&,

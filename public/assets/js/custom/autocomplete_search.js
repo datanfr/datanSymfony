@@ -69,7 +69,11 @@ function initAutocomplete(options) {
             var a = document.createElement('a');
             a.innerHTML = result.text;
             a.className = result.source + ' no-decoration';
-            a.href = get_base_url() + '/' + result.url;
+            // Adresse relative à l'origine, et non `get_base_url()` : ce
+            // helper du legacy renvoie « https://datan.fr » dès que l'hôte
+            // n'est pas localhost, et sortait donc de la préproduction
+            // (datan.remikel.fr) vers le site de production à chaque clic.
+            a.href = '/' + result.url;
             if (list) list.appendChild(a);
           });
         });
@@ -128,7 +132,10 @@ document.addEventListener('DOMContentLoaded', function() {
     resultListId: 'search-results-list',
     wrapperId: 'search-bloc',
     moreLinkId: 'more-results-link',
-    redirectPrefix: 'recherche/'
+    // Barre initiale : le préfixe sert aussi bien à `location.href` qu'au lien
+    // « Plus de résultats », et une forme relative se résoudrait contre la page
+    // courante si la barre de recherche sortait un jour de l'accueil.
+    redirectPrefix: '/recherche/'
   });
   // also initialise city search if present
   // determine appropriate result container IDs (some views reuse home markup)
