@@ -439,6 +439,12 @@ server {
     # Préproduction : jamais d'indexation. Le référencement est le fonds de
     # commerce de datan.fr ; un miroir indexé lui ferait concurrence à
     # lui-même. À retirer le jour de la bascule sur datan.fr.
+    #
+    # L'application pose désormais le même en-tête d'elle-même (voir « Ne pas
+    # indexer la préproduction » plus bas) : cette ligne fait double emploi, et
+    # c'est délibéré. Elle couvre ce que PHP ne sert pas — les fichiers du
+    # dossier public/ rendus directement par nginx — et tient encore si le
+    # serveur reçoit un jour une version du code antérieure à ce garde-fou.
     add_header X-Robots-Tag "noindex, nofollow, noarchive" always;
     auth_basic           "Préproduction";
     auth_basic_user_file /etc/nginx/.htpasswd-datan;
@@ -480,6 +486,40 @@ symbolique, la seconde forme fait servir à OPcache le code de la version
 précédente.
 
 Certificat : `sudo certbot --nginx -d datan.remikel.fr`.
+
+### Ne pas indexer la préproduction
+
+La préproduction sert le site entier sous un autre nom de domaine : mêmes
+pages, mêmes textes, mêmes adresses relatives. Indexée, elle serait un
+duplicata intégral de datan.fr, et les moteurs choisiraient eux-mêmes lequel des
+deux ils gardent. L'application s'en garde toute seule, sans variable
+d'environnement à poser, sur le seul critère qui distingue les deux :
+**l'hôte servi** (`App\Referencement\Indexation`, liste
+`HOTES_NON_INDEXABLES`). `APP_ENV` ne dirait rien — la préproduction tourne en
+`prod`, c'est tout son intérêt.
+
+Trois signaux, chacun suffisant :
+
+| | Où | Portée |
+|---|---|---|
+| `X-Robots-Tag: noindex, nofollow, noarchive` | en-tête, sur **toute** réponse (`App\Referencement\EnTeteRobots`) | HTML, sitemaps XML, `/api`, erreurs |
+| `<meta name="robots" content="noindex, nofollow, noarchive">` | `base.html.twig` et `iframe/depute.html.twig`, via `site_indexable()` | pages HTML |
+| `robots.txt` réduit à `User-agent: * / Disallow: /` | `RobotsController` | tout le domaine |
+
+`/llms.txt` (convention llmstxt.org) s'y ajoute, servi par la **seule**
+préproduction : il dit aux moissonneurs de modèles de langue que ce domaine est
+une copie de travail et renvoie à datan.fr. En production l'adresse répond 404,
+comme sur datan.fr, qui n'a pas ce fichier.
+
+`public/robots.txt` a été supprimé au profit de `RobotsController` : nginx sert
+les fichiers du dossier avant de passer la main à PHP (`try_files $uri`), et la
+préproduction n'avait donc aucun moyen d'en servir un autre. Le texte de
+production est repris à l'octet près dans
+`templates/referencement/robots.txt.twig` ; **aucune configuration nginx n'est
+à ajouter**, le `try_files` existant tombe désormais sur `index.php`.
+
+Le jour de la bascule, rien à faire côté code : `datan.fr` n'est pas dans la
+liste et redevient indexable du seul fait de son nom de domaine.
 
 ### `.env.local` sur le serveur
 
@@ -538,6 +578,11 @@ espérant que ça se voie.
 - [ ] `/sitemap.xml` et chaque sous-sitemap répondent 200, et les adresses
       qu'ils annoncent aussi — un sitemap qui promet des 404 coûte plus cher que
       le silence.
+- [ ] `curl https://datan.remikel.fr/robots.txt` rend bien `Disallow: /` (et non
+      le fichier de datan.fr), `/llms.txt` répond 200, et
+      `curl -I https://datan.remikel.fr/` porte `X-Robots-Tag: noindex`. Le
+      contrôle qui compte est celui-ci : la bascule se joue sur le nom de
+      domaine servi, donc elle ne se vérifie que depuis le domaine.
 - [ ] Les redirections 301 du legacy fonctionnent (slugs de département : tester
       `francais-de-letranger`).
 - [ ] Connexion, mot de passe oublié : le courriel **arrive** (worker Messenger).
@@ -553,3 +598,9 @@ Le reste — `TODO.md` §2 — est à dérouler à ce moment-là : variables de 
 réelles, transvasement des abonnés newsletter, redirections des anciennes API
 (`api/tables`, `api/votes`, `api/exposes`) qu'API Platform ne reprend pas, et
 retrait de l'`auth_basic` et du `X-Robots-Tag` de la préproduction.
+
+Le garde-fou applicatif, lui, n'est pas à toucher : il ne connaît que
+`datan.remikel.fr`, et l'application servie sur `datan.fr` est indexable sans
+aucun changement (cf. « Ne pas indexer la préproduction »). Si le domaine de
+préproduction change ou qu'un second apparaît, c'est
+`Indexation::HOTES_NON_INDEXABLES` qu'on complète.
