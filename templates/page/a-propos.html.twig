@@ -1,5 +1,7 @@
 {% extends 'base.html.twig' %}
 
+{% block preloads %}{{ include('partials/preload_couverture.html.twig') }}{% endblock %}
+
 {% block title %}À propos | Datan{% endblock %}
 
 {% block meta_description %}Datan est un outil indépendant visant à mieux rendre compte de l’activité parlementaire des députés.{% endblock %}

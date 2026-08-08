@@ -525,10 +525,20 @@ class ComportementDepute
         $derniers = \array_slice($croissant, 0, min(3, max(0, \count($barres) - $moitie)));
 
         // Phrase éditoriale : plus proche et moins proche hors de son propre
-        // groupe — législature courante seulement, comme le site.
+        // groupe — législature courante seulement, comme le site. Son départage
+        // d'ex æquo N'est PAS celui des barres : la phrase passe par le
+        // `array_multisort` de `Depute_service`, qui sur accord égal compare
+        // les lignes entières et retombe donc sur le libellé, en ordre
+        // d'OCTETS — une initiale accentuée (« Écologiste… », É = 0xC3 0x89)
+        // pèse plus lourd que tout l'ASCII. C'est ce qui fait dire au site que
+        // Buisson est le moins proche d'ECOS, à 19 % ex æquo avec GDR et
+        // LFI-NFP. (Les barres, elles, sortent du résultat SQL brut : leurs ex
+        // æquo suivent l'ordre physique de sa table — un accident de stockage
+        // qu'on ne reproduit pas, départagé ici par sigle.)
         $proximite = null;
         if ($courante) {
             $autres = array_values(array_filter($barres, fn (array $g) => (int) $g['id'] !== $groupeId));
+            usort($autres, static fn (array $a, array $b) => [(int) $b['accord'], (string) $a['libelle']] <=> [(int) $a['accord'], (string) $b['libelle']]);
             if ($autres !== []) {
                 $plusProche = $autres[0];
                 $moinsProche = $autres[\count($autres) - 1];

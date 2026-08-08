@@ -43,10 +43,17 @@
     {% endif %}
     <meta name="theme-color" content="#00668e">
 
+    {# Préchargements déclarés page par page, comme les `$data['preloads']` du
+       site — la plupart y mettent l'image de couverture, cf.
+       partials/preload_couverture.html.twig. #}
+    {% block preloads %}{% endblock %}
+
     {# La forme canonique est l'adresse servie, sans sa chaîne de requête :
        l'origine recopie REQUEST_URI entière, ?page=2 compris, ce qui fait des
-       balises canoniques qui ne canonisent rien — défaut corrigé, pas choix. #}
-    {% set url_canonique = app.request ? app.request.schemeAndHttpHost ~ app.request.pathInfo : 'https://datan.fr/' %}
+       balises canoniques qui ne canonisent rien — défaut corrigé, pas choix.
+       Une page servie sous plusieurs adresses (archives mensuelles, `07` et
+       `7`) pose sa forme de référence dans `canonical` et l'emporte. #}
+    {% set url_canonique = canonical|default(app.request ? app.request.schemeAndHttpHost ~ app.request.pathInfo : 'https://datan.fr/') %}
     <link rel="canonical" href="{{ url_canonique }}">
 
     {# — Open Graph et Twitter Cards (templates/header.php + Meta_model::get_ogp()

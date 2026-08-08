@@ -1,5 +1,7 @@
 {% extends 'base.html.twig' %}
 
+{% block preloads %}{{ include('partials/preload_couverture.html.twig') }}{% endblock %}
+
 {% block title %}Départements et territoires d'outre-mer | Datan{% endblock %}
 
 {% block meta_description %}Découvrez la liste des départements et territoires d'outre mer de la France.{% endblock %}

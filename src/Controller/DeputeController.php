@@ -744,8 +744,9 @@ class DeputeController extends AbstractController
      *
      * Le premier volet dépend de la fiche affichée :
      * - fiche d'une législature passée → les députés de CETTE législature ;
-     * - député en exercice → les autres membres de son groupe (l'appartenance
-     *   courante, `depute.groupe_id`, est ici la bonne : le député est actif) ;
+     * - député en exercice → les autres membres de son groupe, au rattachement
+     *   le plus récent de la législature (`deputes_all.groupeId`) — partis de
+     *   l'Assemblée compris, comme sur le site ;
      * - sortant (dernier mandat clos) → les députés ayant siégé à la 15e, quirk
      *   du legacy (`get_other_deputes` else : `dateFin IS NOT NULL AND legislature = 15`).
      *
@@ -769,12 +770,25 @@ class DeputeController extends AbstractController
 
         if ($legislatureFiche === Legislature::COURANTE && $actif) {
             $contexte = 'groupe';
+            // Les membres du groupe au sens de `deputes_all` : le rattachement
+            // le plus récent de la législature — encore ouvert d'abord, puis
+            // date de fin la plus tardive (`daily.php:914`) — que le député
+            // siège encore ou non. Le site liste ainsi Barthès et Bordes parmi
+            // « Les autres députés RN » après leur départ de l'Assemblée ;
+            // filtrer sur `depute.groupe_id` (appartenance courante) les
+            // faisait disparaître et décalait toute la liste.
             $autres = $depute['groupe_id'] === null ? [] : $this->connection->fetchAllAssociative(
                 "SELECT $colonnes FROM depute d
-                 WHERE d.groupe_id = :gid AND d.id <> :id AND d.dpt_slug IS NOT NULL
-                   AND EXISTS (SELECT 1 FROM mandat m WHERE m.depute_id = d.id AND m.date_fin IS NULL)
+                 JOIN (SELECT fg.depute_id,
+                              SUBSTRING_INDEX(GROUP_CONCAT(fg.groupe_id
+                                  ORDER BY COALESCE(fg.date_fin, '9999-12-31') DESC, fg.date_debut DESC), ',', 1) AS groupe_recent
+                       FROM fonction_groupe fg
+                       JOIN groupe g ON g.id = fg.groupe_id AND g.legislature = :leg
+                       WHERE fg.nomin_principale = 1
+                       GROUP BY fg.depute_id) r ON r.depute_id = d.id AND r.groupe_recent = :gid
+                 WHERE d.id <> :id AND d.dpt_slug IS NOT NULL
                  $tri",
-                ['gid' => (int) $depute['groupe_id'], 'id' => $id, 'nom' => $nom],
+                ['gid' => (string) $depute['groupe_id'], 'id' => $id, 'nom' => $nom, 'leg' => Legislature::COURANTE],
             );
         } elseif ($legislatureFiche === Legislature::COURANTE) {
             $contexte = 'inactifs';

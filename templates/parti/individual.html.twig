@@ -1,5 +1,7 @@
 {% extends 'base.html.twig' %}
 
+{% block preloads %}{{ include('partials/preload_couverture.html.twig') }}{% endblock %}
+
 {# « Non rattaché(s) » et « Non déclaré(s) » sont des organes PARPOL de service,
    pas des partis : toute la page leur tient un autre discours. #}
 {% set special = parti.libelle_abrev in ['NR', 'ND'] %}

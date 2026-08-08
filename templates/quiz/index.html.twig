@@ -1,5 +1,7 @@
 {% extends 'base.html.twig' %}
 
+{% block preloads %}{{ include('partials/preload_couverture.html.twig') }}{% endblock %}
+
 {# L'application d'origine sert « Blog | Datan » comme titre de cette page
    (Quiz.php:28) : un copier-coller resté du contrôleur du blog, sans rapport
    avec le questionnaire. Coquille corrigée — le titre dit la page. #}

@@ -1,5 +1,7 @@
 {% extends 'base.html.twig' %}
 
+{% block preloads %}{{ include('partials/preload_couverture.html.twig') }}{% endblock %}
+
 {# Liste des articles (views/posts/index.php), partagée entre /blog et les
    rubriques, comme chez l'origine : seule change la colonne de titre — h1
    « Blog » sur l'index, h1 au nom de la rubrique sinon. Les libellés du menu

@@ -101,10 +101,14 @@ vraie base**.
     chargent depuis la prod ; à la bascule, elles se chargeront des fichiers
     locaux. Vérifier ce jour-là. (16 articles portent des liens absolus
     `datan.fr`, images et liens internes confondus.)
-- [ ] **Porter la section « Ses professions de foi » des fiches député** (tableaux
-  législatives 2024/2022, boutons « Profession 1er/2nd tour »). Section entière
-  absente du staging (~460 px). Vérifier d'où le legacy tire les fichiers PDF/liens
-  — regarder du côté de `datan_backup` (le jeu public a peut-être la table).
+- [x] **Section « Ses professions de foi »** — *instruit le 2026-08-08 : déjà
+  entièrement codée* (gabarit `depute/_professions_foi.html.twig`, contrôleur,
+  commande `app:import:professions-foi` avec export au docblock). Elle
+  n'apparaît pas car `profession_foi` est vide dans la copie de travail ET dans
+  le jeu public (réduit, comme `users_mp`) — vérifié dans `datan_backup`.
+  - [ ] **Au déploiement** : rejouer l'import contre la vraie base et copier le
+    répertoire `assets/data/professions/` du serveur (les PDF n'ont pas
+    d'index public, seule la table sait lesquels existent).
 
 ## P1 — Statistiques : écarts de calcul à instruire un par un
 
@@ -116,9 +120,23 @@ Pour chacun : comprendre la règle du legacy (la réponse est dans son code, sou
   Lié au point suivant.
 - [ ] **Dénominateur « nombre de votes » du tableau « Tous les votes »** : uniforme
   à 8 411 côté staging pour un député présent toute la législature, variable côté
-  legacy (8 402 / 8 405 / 8 408 selon le député). Trouver ce que le legacy retranche
-  (scrutins pendant la période d'activité ? exclusions ponctuelles ?) avant de
-  décider qui a raison. 568 lignes sur 576 diffèrent, 5 pourcentages bougent de ±1 pt.
+  legacy (8 402 / 8 405 / 8 408 selon le député). 568 lignes sur 576 diffèrent,
+  5 pourcentages bougent de ±1 pt.
+  *Instruit le 2026-08-08 — la règle legacy est dans `votes_participation`
+  (daily.php:2270-2354)* :
+  1. périmètre `codeTypeVote != "MOC"` (motions de censure exclues) — nous le
+     faisons aussi : 8 434 − 23 MOC = notre 8 411 ;
+  2. borné au `mandat_principal` du député (`datePriseFonction`…`dateFin`) ;
+  3. un scrutin où le député est `nv` (non-votant de droit) vaut **NULL** — ni
+     numérateur ni dénominateur : c'est ça, les 8 402/8 405/8 408 par député
+     (8 411 moins ses scrutins présidés/au Gouvernement). Notre
+     `CalculStatistiquesDeputesCommand` retire déjà les non-votants sur les
+     solennels ; reste à réconcilier le tableau « Tous les votes »
+     (`CalculClassementsCommand` ?) qui garde un dénominateur uniforme ;
+  4. une exception codée en dur : `PA721908` → NULL après le 2022-06-22.
+  À réconcilier député par député (prendre Hamelet 8 402 et Salmon 8 408 comme
+  cas de contrôle) avant de toucher au code — l'écart de ±1 pt sur 5 députés et
+  le 89/90 % moyen devraient tomber avec le même correctif.
 - [ ] **Tableau « Votes par spécialisation »** : legacy 583 lignes (9 députés en
   double — une ligne par commission —, Braun-Pivet absente), staging 575 (dédoublonné,
   Braun-Pivet réintégrée) ; 463 pourcentages sur 574 diffèrent, certains massivement
@@ -168,23 +186,29 @@ Pour chacun : comprendre la règle du legacy (la réponse est dans son code, sou
 - [ ] **Top 30 des plus grandes communes** : le staging insère Saint-Denis de La
   Réunion (20e), le legacy l'exclut. Retrouver le critère legacy (exclusion
   outre-mer ? population différente ?) et s'aligner ou assumer.
-- [ ] **Casse des noms de candidats** : legacy « Marc CHAVENT », staging
-  « Marc Chavent ». Choix d'affichage à trancher (parité = capitales).
+- [x] **Casse des noms de candidats** — *fait le 2026-08-08.* La page résultats
+  rend le nom brut, donc en capitales (« Marc CHAVENT »), comme
+  `results_city.php` ; la fiche commune garde la casse mixte
+  (`ucfirst(mb_strtolower())`), qui est aussi ce que fait le legacy à cet
+  endroit-là — les deux pages du site ne suivent pas la même règle, nous non
+  plus désormais.
 - [ ] **Habillage municipales 2026 des pages résultats** (title/h1/meta « Élections
   municipales 2026 dans l'Ain ») : différence assumée tant que les municipales ne
   sont pas portées — à réévaluer si le périmètre change. Rien à faire pour l'instant.
 
-## P2 — Sitemaps
+## P2 — Sitemaps — *fait le 2026-08-08*
 
-- [ ] **Ajouter au sitemap structure les 7 pages fixes manquantes** : `/a-propos`,
-  `/faq`, `/mentions-legales`, `/soutenir`, `/parrainages-2022`,
-  `/outils/coalition-simulateur`, `/blog` (toutes répondent 200 ; le legacy les
-  annonce ; le site vit de son référencement).
-- [ ] **Zéro-padder les mois des archives** dans le sitemap : annoncer
-  `/votes/legislature-17/2026/07`, pas `/2026/7`. Les deux formes répondent 200 sans
-  canonical commun → au passage, faire pointer le canonical des deux formes vers la
-  forme zéro-paddée (celle indexée depuis des années).
-- [ ] **`ville_0` disparaîtra du sitemap** avec la correction P0 — vérifier.
+- [x] **Les 7 pages fixes sont annoncées** (`/a-propos`, `/faq`,
+  `/mentions-legales`, `/soutenir`, `/parrainages-2022`,
+  `/outils/coalition-simulateur`, `/blog`) — et `/blog` a quitté le plan des
+  catégories pour celui de structure, comme sur le site (3 URL de rubriques,
+  à l'identique).
+- [x] **Mois zéro-paddés** dans le plan (`2026/07`), et **canonical** : les deux
+  graphies d'une page mois pointent désormais vers la forme zéro-paddée
+  (variable `canonical` posée par `vote/all.html.twig`, reprise par `base`).
+  Le site a le défaut du double self-canonical ; on ne le reproduit pas.
+- [x] **`ville_0` a disparu du sitemap** — vérifié après la correction P0
+  (`ville_faux`, `ville_etoile`, `ville_nonieres` annoncées).
 - [ ] Extensions assumées du sitemap staging (groupes NI, `/commissions`,
   `/legislature-N`, inactifs L14-16, `/votes/all` retirés des inactifs) : rien à
   faire, mais vérifier par échantillon que tout ce qui est annoncé répond 200.
@@ -246,12 +270,21 @@ Pour chacun : comprendre la règle du legacy (la réponse est dans son code, sou
   aligné différemment ; et le lien « Consultez les résultats complets » n'est plus
   souligné. Deux détails de CSS à reprendre.
 - [ ] **Icône « Proximité avec son groupe »** (poignée de main) : graisse différente.
-- [ ] **Liste « Les autres députés RN »** de la fiche Buisson : sélection différente
-  (legacy : Barthès, Bordes ; staging : Bovet, Casterman). Retrouver le critère de
-  sélection du legacy (aléatoire ? alphabétique ? même département ?).
-- [ ] **« Il vote rarement avec »** (fiche Buisson) : trois groupes ex æquo à 19 %,
-  le texte legacy cite ECOS, le staging LFI-NFP. Même chantier que le départage
-  d'ex æquo des statistiques.
+- [x] **Liste « Les autres députés RN »** — *fait le 2026-08-08.* Le critère
+  legacy est `deputes_all.groupeId` : le rattachement **le plus récent** de la
+  législature (règle de CLAUDE.md), que le député siège encore ou non — c'est
+  pour ça que Barthès et Bordes, partis de l'Assemblée, y figurent. Notre
+  filtre « mandat ouvert » les excluait. Requête réécrite sur
+  `fonction_groupe` ; liste vérifiée **identique lien à lien** à datan.fr sur
+  la fiche Buisson.
+- [x] **« Il vote rarement avec »** — *fait le 2026-08-08.* Le départage de la
+  PHRASE est déterministe chez le legacy : son `array_multisort` compare les
+  lignes entières et retombe sur le libellé en ordre d'octets (« Écologiste »,
+  É = 0xC3 0x89, pèse plus que tout l'ASCII) — d'où ECOS « moins proche » de
+  Buisson à 19 % ex æquo. Reproduit dans `ComportementDepute` ; vérifié
+  identique. Les BARRES, elles, sortent du résultat SQL brut du legacy (ordre
+  physique sur les ex æquo, accident non reproductible) : notre départage par
+  sigle reste, commenté.
 - [ ] **Fiche groupe DEM, texte de présentation** : le staging a un paragraphe
   enrichi absent du legacy, terminé par un « .. » (double point). Corriger la
   ponctuation ; décider si le texte enrichi reste (il vient probablement de la base
@@ -262,9 +295,13 @@ Pour chacun : comprendre la règle du legacy (la réponse est dans son code, sou
 
 ## P2 — Performance et SEO techniques
 
-- [ ] **Remettre les `<link rel=preload>`** des images de couverture
-  (`/assets/imgs/cover/hemicycle-front{-375,-768,}.jpg`) sur les pages qui les
-  avaient (département, a-propos, mentions-legales, soutenir…) : LCP.
+- [x] **`<link rel=preload>` des images de couverture rétablis** — *fait le
+  2026-08-08.* Bloc `preloads` dans `base.html.twig` + partiel
+  `partials/preload_couverture.html.twig`, posé sur les 17 gabarits
+  correspondant aux déclarations du site (relevées méthode par méthode dans ses
+  neuf contrôleurs : City, Departement×2, Deputes::votes, Groupes×4,
+  Pages::view, Parties, Posts×2, Quiz×2, Votes::all+individual). Vérifié : 3
+  preloads sur chaque page testée.
 - [ ] **Alt des vignettes blog** : « Image post 15 » vs « Image post 26 » — l'ID
   auto-incrémenté diffère entre bases. Sans gravité, mais un alt parlant (titre de
   l'article) réglerait la question mieux que la parité.

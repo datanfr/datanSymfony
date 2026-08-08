@@ -1,5 +1,7 @@
 {% extends 'base.html.twig' %}
 
+{% block preloads %}{{ include('partials/preload_couverture.html.twig') }}{% endblock %}
+
 {# `libelle_de` porte son espace final quand il en faut un : « des » suivi d'un
    espace, « de l' » sans. Il se concatène donc au nom sans rien ajouter. #}
 {% set nom_article = departement.libelle_de ~ departement.nom %}

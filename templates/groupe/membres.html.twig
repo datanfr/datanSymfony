@@ -1,5 +1,7 @@
 {% extends 'base.html.twig' %}
 
+{% block preloads %}{{ include('partials/preload_couverture.html.twig') }}{% endblock %}
+
 {% set nom_groupe = groupe.libelle|name_group %}
 {% set non_inscrits = groupe.libelle_abrev == 'NI' %}
 {% set titre = non_inscrits

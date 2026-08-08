@@ -1,5 +1,7 @@
 {% extends 'base.html.twig' %}
 
+{% block preloads %}{{ include('partials/preload_couverture.html.twig') }}{% endblock %}
+
 {% set nom_complet = depute.firstname ~ ' ' ~ depute.lastname %}
 {% set femme = depute.civilite == 'Mme' %}
 {% set e = femme ? 'e' : '' %}

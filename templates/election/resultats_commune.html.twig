@@ -127,7 +127,12 @@
                           {% for candidat in bloc.candidats %}
                             <div class="candidate-row d-flex flex-wrap align-items-start py-2">
                               <div class="col-8 order-1 col-lg-4 order-lg-1 px-0 mb-1 mb-lg-0" style="min-width: 0;">
-                                <div class="font-weight-bold">{{ candidat.prenom }} {{ candidat.nom|lower|capitalize }}</div>
+                                {# Nom rendu tel quel, donc en capitales
+                                   (« Marc CHAVENT ») : c'est ce que fait la
+                                   page résultats du site (results_city.php,
+                                   nom brut) — contrairement à la fiche
+                                   commune, qui remet la casse mixte. #}
+                                <div class="font-weight-bold">{{ candidat.prenom }} {{ candidat.nom }}</div>
                                 {% if candidat.nuance %}
                                   <small class="text-muted">{{ candidat.nuance }}</small>
                                 {% endif %}

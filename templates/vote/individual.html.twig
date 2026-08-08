@@ -1,5 +1,7 @@
 {% extends 'base.html.twig' %}
 
+{% block preloads %}{{ include('partials/preload_couverture.html.twig') }}{% endblock %}
+
 {% set decrypte = scrutin.decryptage_title is not empty %}
 {% set titre_affiche = decrypte ? scrutin.decryptage_title : scrutin.titre %}
 {# Le Congrès a sa propre série de numéros : le numéro affiché est négatif, et

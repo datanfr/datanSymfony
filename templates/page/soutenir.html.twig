@@ -1,5 +1,7 @@
 {% extends 'base.html.twig' %}
 
+{% block preloads %}{{ include('partials/preload_couverture.html.twig') }}{% endblock %}
+
 {% block title %}Soutenez-nous | Datan{% endblock %}
 
 {% block meta_description %}Soutenez Datan, l'outil indépendant qui rend l'Assemblée nationale accessible à tous et explique comment les députés votent. Votre don finance la transparence parlementaire et le décryptage des scrutins de l'Assemblée nationale.{% endblock %}

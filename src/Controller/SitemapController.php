@@ -266,11 +266,14 @@ class SitemapController extends AbstractController
      * Rubriques du blog. Seules celles ayant au moins un article publié : une
      * rubrique vide répond 404 ({@see BlogController::liste()}), et un plan
      * n'annonce que du 200.
+     *
+     * `/blog` n'est pas ici mais dans le plan structure, comme sur le site :
+     * l'y répéter annoncerait deux fois la même adresse.
      */
     #[Route('/sitemap-categories-1.xml', name: 'sitemap_blog_categories', methods: ['GET'])]
     public function blogCategories(): Response
     {
-        $adresses = [$this->url('blog_index')];
+        $adresses = [];
 
         foreach ($this->connection->fetchFirstColumn(
             "SELECT c.slug
@@ -304,6 +307,11 @@ class SitemapController extends AbstractController
     #[Route('/sitemap-structure-1.xml', name: 'sitemap_structure', methods: ['GET'])]
     public function structure(): Response
     {
+        // Les pages fixes annoncées par le site le restent ici : le
+        // référencement est le fonds de commerce de Datan, et son plan
+        // structure liste /a-propos, /faq, /mentions-legales, /soutenir,
+        // /parrainages-2022, /outils/coalition-simulateur et /blog — sept
+        // adresses qui manquaient à l'appel alors qu'elles répondent 200.
         $adresses = [
             $this->url('home'),
             $this->url('deputes_index'),
@@ -317,6 +325,13 @@ class SitemapController extends AbstractController
             $this->url('commissions_index'),
             $this->url('classement_index'),
             $this->url('page_statistiques'),
+            $this->url('page_a_propos'),
+            $this->url('faq_index'),
+            $this->url('page_mentions_legales'),
+            $this->url('page_soutenir'),
+            $this->url('parrainages_index'),
+            $this->url('outils_coalition_simulateur'),
+            $this->url('blog_index'),
         ];
 
         // La législature courante n'a pas d'adresse en `legislature-17` : les
@@ -493,10 +508,15 @@ class SitemapController extends AbstractController
                 $adresses[] = $this->url('votes_annee', ['legislature' => $legislature, 'annee' => $annee]);
             }
 
+            // Mois sur deux chiffres (`2026/07`, jamais `2026/7`) : c'est la
+            // forme que le site annonce et que les moteurs indexent depuis des
+            // années. La route accepte les deux graphies et les sert en 200 —
+            // le plan n'en publie qu'une, l'historique, sous peine de faire
+            // naître un doublon d'adresses.
             $adresses[] = $this->url('votes_mois', [
                 'legislature' => $legislature,
                 'annee' => $annee,
-                'mois' => (int) $periode['mois'],
+                'mois' => sprintf('%02d', (int) $periode['mois']),
             ]);
         }
 

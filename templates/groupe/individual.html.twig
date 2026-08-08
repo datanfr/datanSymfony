@@ -1,5 +1,7 @@
 {% extends 'base.html.twig' %}
 
+{% block preloads %}{{ include('partials/preload_couverture.html.twig') }}{% endblock %}
+
 {% import 'groupe/partials/_icones.html.twig' as ico %}
 
 {% set nom_groupe = groupe.libelle|name_group %}

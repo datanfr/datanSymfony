@@ -1,5 +1,7 @@
 {% extends 'base.html.twig' %}
 
+{% block preloads %}{{ include('partials/preload_couverture.html.twig') }}{% endblock %}
+
 {% block title %}Mentions légales{% endblock %}
 
 {# Seule page du site dont le titre d'onglet ne porte pas « | Datan » : le

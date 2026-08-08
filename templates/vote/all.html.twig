@@ -1,11 +1,22 @@
 {% extends 'base.html.twig' %}
 
+{% block preloads %}{{ include('partials/preload_couverture.html.twig') }}{% endblock %}
+
 {% set periode %}
   {%- if mois %}{{ mois_libelle|capitalize }} {{ annee }}
   {%- elseif annee %}{{ annee }}
   {%- else %}{{ legislature }}<sup>e</sup> législature
   {%- endif %}
 {% endset %}
+
+{# Les deux graphies du mois — « 2024/06 » et « 2024/6 » — servent la même page
+   en 200, ici comme sur le site. La forme canonique est la zéro-paddée : c'est
+   elle que le plan annonce et que les moteurs indexent depuis des années ;
+   sans cette balise, les deux adresses se disputeraient l'indexation (le site
+   a le même défaut, on ne le reproduit pas). #}
+{% if mois %}
+  {% set canonical = url('votes_mois', {legislature: legislature, annee: annee, mois: '%02d'|format(mois)}) %}
+{% endif %}
 
 {% block title %}
   {%- if mois %}Votes {{ mois_libelle|capitalize }} {{ annee }} Assemblée Nationale - Résultat et Analyse | Datan
