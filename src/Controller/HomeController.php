@@ -207,8 +207,13 @@ class HomeController extends AbstractController
      */
     private function groupesHemicycle(int $legislature): array
     {
+        // « Députés non inscrits » et non le « Non inscrit » de la base : le
+        // site applique ce renommage dans toutes les requêtes de son
+        // Groupes_model (CASE WHEN o.libelle = "Non inscrit"), et c'est le
+        // libellé qui sort dans les bulles de l'hémicycle.
         return $this->connection->fetchAllAssociative(
-            'SELECT g.libelle, g.libelle_abrev, g.legislature, COUNT(d.id) AS effectif,
+            'SELECT CASE WHEN g.libelle = \'Non inscrit\' THEN \'Députés non inscrits\' ELSE g.libelle END AS libelle,
+                    g.libelle_abrev, g.legislature, COUNT(d.id) AS effectif,
                     ' . CouleurGroupe::SQL . ' AS couleur
              FROM groupe g
              LEFT JOIN depute d ON d.groupe_id = g.id

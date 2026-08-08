@@ -14,7 +14,16 @@
   {%- endif %}
 {% endblock %}
 
-{% block meta_description %}Retrouvez tous les votes de l'Assemblée nationale de la {{ legislature }}e législature. Détails des votes, résultats des groupes et des députés, statistiques de participation, de loyauté et de cohésion.{% endblock %}
+{# Trois formulations distinctes comme dans Votes.php (lignes 175, 202, 234) :
+   la spécificité de la période compte pour le référencement des archives, et
+   les variantes année/mois ne mentionnent ni « participation » ni la
+   législature — reprises telles quelles. #}
+{% block meta_description %}
+  {%- if mois %}Retrouvez tous les votes de l'Assemblée nationale en {{ mois_libelle }} {{ annee }}. Détails des votes, résultats de vote des groupes et des députés, statistiques de loyauté et de cohésion.
+  {%- elseif annee %}Retrouvez tous les votes de l'Assemblée nationale en {{ annee }}. Détails des votes, résultats de vote des groupes et des députés, statistiques de loyauté et de cohésion.
+  {%- else %}Retrouvez tous les votes de l'Assemblée nationale de la {{ legislature }}e législature. Détails des votes, résultats des groupes et des députés, statistiques de participation, de loyauté et de cohésion.
+  {%- endif %}
+{% endblock %}
 
 {% block stylesheets %}
   <link rel="stylesheet" type="text/css" href="{{ asset('assets/css/datatables.bootstrap4.min.css') }}">

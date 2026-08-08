@@ -443,7 +443,12 @@
               <div class="row">
                 <div class="col-2"><div class="icon">{{ ico.group() }}</div></div>
                 <div class="col-10">
-                  <h3>LES COALITIONS LES PLUS FREQUENTES</h3>
+                  <h3>LES COALITIONS LES PLUS FREQUENTES
+                    {# Même explication que la proximité entre groupes : le site
+                       réutilise le popover du taux de proximité sous le titre
+                       « Coalitions les plus fréquentes » (individual.php:592). #}
+                    {{ include('groupe/partials/aide.html.twig', {titre: 'Coalitions les plus fréquentes', libelle: 'la proximité avec les groupes politiques', contenu: "Le <b>taux de proximité entre deux groupes</b> représente le pourcentage de fois où les deux groupes ont voté la même chose. Chaque groupe se voit attribuer une <i>position majoritaire</i>, en fonction du vote de ses membres. Cette position peut soit être 'pour', 'contre', ou 'absention'. Pour chaque vote, nous déterminons si les deux groupes ont la même position majoritaire. Le taux de proximité est le pourcentage de fois où les deux groupes ont cette même position majoritaire.<br><br>Par exemple, si le taux est de 75%, cela signifie que les deux groupes ont voté la même chose dans 75% des cas.<br><br>Pour plus d'information, <a href='" ~ path('page_statistiques') ~ "#proximity' target='_blank'>cliquez ici</a>."}) }}
+                  </h3>
                   <p>Dans une Assemblée nationale où aucun groupe n'a la majorité absolue, les coalitions sont essentielles pour faire adopter des textes. Avec quels groupes le {{ groupe.libelle_abrev }} s'associe-t-il lors des votes ?</p>
                   <p>
                     La coalition avec laquelle le groupe {{ groupe.libelle_abrev }} a le plus fréquemment voté ({{ coalitions[0].votes }} scrutins sur {{ comportement.scrutins }}) est une coalition composée

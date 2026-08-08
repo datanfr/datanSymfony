@@ -31,7 +31,13 @@ use Symfony\Component\Console\Style\SymfonyStyle;
  *
  * docker exec datan-db mariadb -h 127.0.0.1 -u datan -pdatan datan \
  *   --default-character-set=utf8mb4 -B -e "
- *   SELECT c.insee, c.dpt, c.commune_nom, c.commune_slug,
+ *   SELECT c.insee, c.dpt,
+ *          COALESCE(NULLIF(c.commune_nom, '0'), ci.nom_standard) AS commune_nom,
+ *          CASE c.insee
+ *            WHEN '39217' THEN 'etoile'
+ *            WHEN '07165' THEN 'nonieres'
+ *            ELSE COALESCE(NULLIF(c.commune_slug, '0'), LOWER(ci.nom_sans_accent))
+ *          END AS commune_slug,
  *          MAX(ci.population) AS population,
  *          GROUP_CONCAT(DISTINCT c.circo ORDER BY CAST(c.circo AS UNSIGNED)) AS circos,
  *          MAX(i.postal) AS code_postal,
@@ -40,19 +46,51 @@ use Symfony\Component\Console\Style\SymfonyStyle;
  *   LEFT JOIN cities ci ON ci.code_insee = c.insee
  *   LEFT JOIN insee i ON i.insee = c.insee
  *   LEFT JOIN cities_infos cin ON cin.insee = c.insee
- *   GROUP BY c.insee, c.dpt, c.commune_nom, c.commune_slug
- *   ORDER BY c.dpt, c.commune_nom;" > var/legacy/communes.tsv
+ *   GROUP BY c.insee, c.dpt, commune_nom, commune_slug
+ *   ORDER BY c.dpt, commune_nom;" > var/legacy/communes.tsv
+ *
+ * Les `NULLIF(…, '0')` ne sont pas décoratifs : dans la copie dont nous
+ * disposons, les deux communes nommées « Faux » (08165 dans les Ardennes,
+ * 24177 en Dordogne) portent `commune_nom = '0'` et `commune_slug = '0'` —
+ * « Faux » est le libellé français du booléen FALSE, un aller-retour par un
+ * tableur les a convertis. La production réelle, elle, sert bien
+ * `/elections/resultats/dordogne-24/ville_faux` : la corruption n'existe que
+ * dans le dump. Sans cette garde, la commune sortait sous l'adresse
+ * `ville_0` (annoncée telle quelle par le sitemap) et l'URL du legacy
+ * rendait 404. `cities.nom_standard` est sain pour ces deux lignes, et
+ * `LOWER(nom_sans_accent)` redonne exactement le slug que la production
+ * sert (« faux »).
+ *
+ * Le `CASE` sur Étoile (L') et Nonières (Les) compense un autre décalage du
+ * dump : la production a nettoyé ces deux slugs **après** la prise de notre
+ * copie — datan.fr sert et annonce `ville_etoile` et `ville_nonieres`, quand
+ * le dump garde `etoile-(l)` et `nonieres-(les)`. L'adresse du site est le
+ * contrat : c'est sa page département qui fait foi (vérifié le 2026-08-08 sur
+ * les cinq départements concernés). Ne pas généraliser aux 22 autres communes
+ * à slug parenthésé : Assions (Les), Ollières-sur-Eyrieux (Les) et
+ * Bonvillers (Mont) sont liées AVEC leurs parenthèses par datan.fr (qui les
+ * refuse ensuite en 400 — défaut du legacy, pas un contrat), et les autres ne
+ * sont liées nulle part.
  *
  * docker exec datan-db mariadb -h 127.0.0.1 -u datan -pdatan datan \
  *   --default-character-set=utf8mb4 -B -e "
  *   SELECT DISTINCT a.insee, a.adjacente
  *   FROM cities_adjacentes a JOIN circos c ON c.insee = a.adjacente
  *   ORDER BY a.insee, a.adjacente;" > var/legacy/communes_adjacentes.tsv
+ *
+ * docker exec datan-db mariadb -h 127.0.0.1 -u datan -pdatan datan \
+ *   --default-character-set=utf8mb4 -B -e "
+ *   SELECT insee, nameFirst, nameLast, gender
+ *   FROM cities_mayors ORDER BY insee;" > var/legacy/maires.tsv
  * ```
  *
- * Le maire de chaque commune (`cities_mayors`) manque à l'appel : la table est
- * vide dans la copie dont nous disposons, alors que le site en affiche un. Le
- * paragraphe correspondant de la fiche de ville reste donc non porté.
+ * Le maire (`cities_mayors`) a longtemps manqué : la table est **vide dans la
+ * copie de travail**, ce qui avait fait conclure à une donnée non récupérable
+ * et laisser de côté le paragraphe « Le maire de X est Y. » des fiches de
+ * ville. Elle est en réalité complète (34 874 communes) dans le jeu public
+ * `datan.fr/assets/dataset_backup/general/latest.sql`, d'où viennent les
+ * chiffres ci-dessus. La requête reste écrite contre `datan` : au déploiement,
+ * c'est la vraie base qu'on interroge, pas le jeu public.
  */
 #[AsCommand(
     name: 'app:import:communes',
@@ -73,7 +111,8 @@ class ImportCommunesCommand extends ImportLegacyCommand
         $this
             ->addOption('departements', null, InputOption::VALUE_REQUIRED, 'Export TSV de la table departement', 'var/legacy/departements.tsv')
             ->addOption('communes', null, InputOption::VALUE_REQUIRED, 'Export TSV des communes et de leurs circonscriptions', 'var/legacy/communes.tsv')
-            ->addOption('adjacentes', null, InputOption::VALUE_REQUIRED, 'Export TSV des couples de communes limitrophes', 'var/legacy/communes_adjacentes.tsv');
+            ->addOption('adjacentes', null, InputOption::VALUE_REQUIRED, 'Export TSV des couples de communes limitrophes', 'var/legacy/communes_adjacentes.tsv')
+            ->addOption('maires', null, InputOption::VALUE_REQUIRED, 'Export TSV des maires', 'var/legacy/maires.tsv');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
@@ -86,11 +125,13 @@ class ImportCommunesCommand extends ImportLegacyCommand
 
         $this->importeCommunes($io, (string) $input->getOption('communes'));
         $this->importeAdjacentes($io, (string) $input->getOption('adjacentes'));
+        $this->importeMaires($io, (string) $input->getOption('maires'));
 
         $io->success(sprintf(
-            '%d départements, %d communes, %d rattachements et %d voisinages en base.',
+            '%d départements, %d communes (%d avec maire), %d rattachements et %d voisinages en base.',
             (int) $this->connection->fetchOne('SELECT COUNT(*) FROM departement'),
             (int) $this->connection->fetchOne('SELECT COUNT(*) FROM commune'),
+            (int) $this->connection->fetchOne('SELECT COUNT(*) FROM commune WHERE maire_nom IS NOT NULL'),
             (int) $this->connection->fetchOne('SELECT COUNT(*) FROM commune_circonscription'),
             (int) $this->connection->fetchOne('SELECT COUNT(*) FROM commune_adjacente'),
         ));
@@ -116,7 +157,11 @@ class ImportCommunesCommand extends ImportLegacyCommand
             [$code, $nom, $slug, $dans, $de, $region] = array_pad($ligne, 6, null);
             $code = strtoupper((string) $code);
 
-            $lot[] = [$code, $nomsAssemblee[$code] ?? $nom, $slug, $dans, $de, $region];
+            // Seule exception à la préférence pour l'Assemblée : elle écrit
+            // « Polynésie Française », adjectif pourtant en minuscule — la
+            // graphie du site (« Polynésie française », sa table departement)
+            // est la bonne et c'est elle qui s'affiche partout.
+            $lot[] = [$code, $code === '987' ? $nom : ($nomsAssemblee[$code] ?? $nom), $slug, $dans, $de, $region];
         }
 
         $this->upsert('departement', self::COLONNES_DEPARTEMENT, $lot, ['nom', 'slug', 'libelle_dans', 'libelle_de', 'region']);
@@ -133,6 +178,7 @@ class ImportCommunesCommand extends ImportLegacyCommand
         $lot = [];
         $communes = 0;
         $sansDepartement = 0;
+        $nomsCorrompus = 0;
 
         $misAJour = ['nom', 'slug', 'population', 'population2012', 'code_postal', 'departement_id'];
 
@@ -143,6 +189,18 @@ class ImportCommunesCommand extends ImportLegacyCommand
 
             if ($idDepartement === null) {
                 ++$sansDepartement;
+
+                continue;
+            }
+
+            // Un nom ou un slug sans la moindre lettre est une corruption
+            // connue de l'export : les communes nommées « Faux » ressortent en
+            // « 0 » d'un dump passé par un tableur (FALSE en français). La
+            // requête du docblock les répare à la source ; si la ligne arrive
+            // quand même corrompue, on la refuse plutôt que d'écraser la ligne
+            // saine déjà en base — et on le dit, pour que l'écart se voie.
+            if (!preg_match('/\p{L}/u', (string) $nom) || !preg_match('/\p{L}/u', (string) $slug)) {
+                ++$nomsCorrompus;
 
                 continue;
             }
@@ -180,6 +238,13 @@ class ImportCommunesCommand extends ImportLegacyCommand
 
         if ($sansDepartement > 0) {
             $io->text(sprintf('  %d communes écartées : département absent de l\'export.', $sansDepartement));
+        }
+
+        if ($nomsCorrompus > 0) {
+            $io->warning(sprintf(
+                '%d communes écartées : nom ou slug sans aucune lettre (« Faux » converti en « 0 » par un tableur ?). Régénérer l\'export avec la requête du docblock, qui répare depuis cities.nom_standard.',
+                $nomsCorrompus,
+            ));
         }
 
         if ($sansCommune > 0) {
@@ -272,6 +337,113 @@ class ImportCommunesCommand extends ImportLegacyCommand
         if ($inconnues > 0) {
             $io->text(sprintf('  %d couples écartés : commune absente du découpage électoral.', $inconnues));
         }
+    }
+
+    /**
+     * Le maire de chaque commune.
+     *
+     * Écrit par `UPDATE` et non par upsert : la ligne de commune existe déjà,
+     * et un `INSERT … ON DUPLICATE KEY` demanderait de reposer toutes ses
+     * colonnes NOT NULL. Le fichier est facultatif — l'absence d'export ne
+     * doit pas faire échouer un import de géographie.
+     *
+     * La correction manuelle du site (Berre-l'Étang, `SALVO` réécrit en
+     * `Doriol`) n'est pas portée : son référentiel a depuis été remis à jour et
+     * porte le bon nom, la substitution ne s'y déclenche plus.
+     */
+    private function importeMaires(SymfonyStyle $io, string $fichier): void
+    {
+        if (!is_file($fichier)) {
+            $io->text('Aucun export de maires : colonnes laissées en l\'état.');
+
+            return;
+        }
+
+        $idCommunes = $this->idCommunesParInsee();
+
+        $maires = 0;
+        $inconnues = 0;
+        $lot = [];
+
+        foreach ($this->lignes($fichier) as $ligne) {
+            [$insee, $prenom, $nom, $civilite] = array_pad($ligne, 4, null);
+
+            $idCommune = $idCommunes[strtolower((string) $insee)] ?? null;
+
+            if ($idCommune === null) {
+                ++$inconnues;
+
+                continue;
+            }
+
+            if ($nom === null || $nom === '') {
+                continue;
+            }
+
+            $lot[] = [$idCommune, $prenom, $nom, $civilite];
+            ++$maires;
+
+            if (\count($lot) >= self::TAILLE_LOT) {
+                $this->ecrisMaires($lot);
+                $lot = [];
+            }
+        }
+
+        $this->ecrisMaires($lot);
+
+        $io->text(sprintf('%d maires.', $maires));
+
+        if ($inconnues > 0) {
+            $io->text(sprintf('  %d maires écartés : commune absente du découpage électoral.', $inconnues));
+        }
+    }
+
+    /**
+     * @param list<array{0: int, 1: string|null, 2: string|null, 3: string|null}> $lot
+     */
+    private function ecrisMaires(array $lot): void
+    {
+        if ($lot === []) {
+            return;
+        }
+
+        // Un CASE par colonne plutôt qu'un UPDATE par ligne : 35 000 allers et
+        // retours coûteraient plus que tout le reste de l'import réuni.
+        $ids = array_column($lot, 0);
+        $marqueurs = implode(',', array_fill(0, \count($ids), '?'));
+
+        $prenoms = $noms = $civilites = '';
+        $valeurs = [];
+
+        foreach ($lot as [$id, $prenom, $nom, $civilite]) {
+            $prenoms .= ' WHEN ? THEN ?';
+            $noms .= ' WHEN ? THEN ?';
+            $civilites .= ' WHEN ? THEN ?';
+            $valeurs[] = [$id, $prenom, $nom, $civilite];
+        }
+
+        $parametres = [];
+        foreach ($valeurs as [$id, $prenom]) {
+            $parametres[] = $id;
+            $parametres[] = $prenom;
+        }
+        foreach ($valeurs as [$id, , $nom]) {
+            $parametres[] = $id;
+            $parametres[] = $nom;
+        }
+        foreach ($valeurs as [$id, , , $civilite]) {
+            $parametres[] = $id;
+            $parametres[] = $civilite;
+        }
+
+        $this->connection->executeStatement(
+            'UPDATE commune SET
+                maire_prenom = CASE id' . $prenoms . ' END,
+                maire_nom = CASE id' . $noms . ' END,
+                maire_civilite = CASE id' . $civilites . ' END
+             WHERE id IN (' . $marqueurs . ')',
+            array_merge($parametres, $ids),
+        );
     }
 
     /**

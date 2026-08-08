@@ -7,6 +7,7 @@ use App\Entity\DossierActeur;
 use App\Groupe\ParticipationGroupe;
 use App\Legislature;
 use App\Referencement\OpenGraph;
+use App\TitreMeta;
 use App\TypeVoteEdito;
 use Doctrine\DBAL\Connection;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
@@ -191,6 +192,13 @@ class VoteController extends AbstractController
 
         $response = $this->render('vote/individual.html.twig', [
             'scrutin' => $scrutin,
+            // Segment central du <title> et de la meta description, au format
+            // du site d'origine (« Vote n°N - {titre_meta} - Le législature »).
+            'titre_meta' => TitreMeta::pour(
+                $scrutin['titre'] ?? null,
+                $scrutin['nature_vote'] ?? null,
+                $scrutin['dossier_titre'] ?? null,
+            ),
             // « Type de vote » de l'encart Infos : le libellé éditorial du site
             // (« amendement », « projet de loi »…) et son info-bulle, et non le
             // code de scrutin de l'Assemblée. Cf. TypeVoteEdito.
@@ -526,6 +534,12 @@ class VoteController extends AbstractController
      */
     private function groupBreakdown(int $scrutinId): array
     {
+        // Divergence assumée avec le site sur l'ordre des groupes (donc des
+        // logos de « La position des groupes ») : sa requête, get_vote_groupes,
+        // n'a AUCUN ORDER BY, et l'ordre affiché est l'ordre physique des
+        // lignes de sa table organes (vérifié sur le vote 997 : SOC, GDR,
+        // LIOT, DEM, ECOS, EPR, DR…). Un accident de stockage n'est pas un
+        // choix à reproduire : on trie par effectif décroissant, déterministe.
         $rows = $this->connection->fetchAllAssociative(
             'SELECT g.id AS groupe_id, g.libelle, g.libelle_abrev, g.legislature, g.couleur,
                     vg.nombre_membres_groupe AS effectif,

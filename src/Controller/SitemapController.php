@@ -232,11 +232,15 @@ class SitemapController extends AbstractController
      * huit fois plus bas que celui des fiches de ville de `/deputes`. Une
      * commune plus petite a bien sa page, mais rien n'y mène.
      *
-     * Les cinq communes à slug parenthésé dépassant le seuil en sont écartées :
+     * Les trois communes à slug parenthésé dépassant le seuil en sont écartées
+     * — Assions (Les), Ollières-sur-Eyrieux (Les), Bonvillers (Mont) :
      * datan.fr renvoie 400 sur ces adresses (les parenthèses brutes sont rejetées
      * en amont de son routeur), et un plan n'annonce que ce que la référence sert
      * en 200. Nos pages les servent bien — la route accepte les parenthèses, cf.
      * {@see ElectionController::SLUG_COMMUNE} — mais on ne les référence pas.
+     * Elles étaient cinq : Étoile (L') et Nonières (Les) ont retrouvé le slug
+     * sans parenthèses que la production sert réellement, réparé à l'import
+     * ({@see \App\Command\ImportCommunesCommand}), et rentrent donc dans le plan.
      */
     #[Route('/sitemap-elections-v-1.xml', name: 'sitemap_elections_communes', methods: ['GET'])]
     public function electionsCommunes(): Response

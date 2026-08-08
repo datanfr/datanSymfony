@@ -746,7 +746,51 @@ class GroupeController extends AbstractController
 
         usort($coalitions, static fn (array $a, array $b) => $b['votes'] <=> $a['votes']);
 
+        // L'ordre alphabétique ci-dessus n'est que la clé de recollage : à
+        // l'affichage, le site range les badges d'une coalition par effectif
+        // décroissant (`format_coalitions()`, uasort sur `groupes_effectif`) —
+        // RN, EPR, DR, DEM… et non DEM, DR, EPR.
+        $effectifs = $this->effectifsParSigle($legislature);
+        foreach ($coalitions as &$coalition) {
+            usort(
+                $coalition['sigles'],
+                static fn (string $a, string $b) => [$effectifs[$b] ?? 0, $a] <=> [$effectifs[$a] ?? 0, $b],
+            );
+        }
+
         return $coalitions;
+    }
+
+    /**
+     * Effectif de chaque groupe de la législature, pour ranger les badges.
+     *
+     * La composition suit la règle du projet : les rattachements principaux
+     * couvrant la date de référence du groupe — aujourd'hui pour un groupe en
+     * activité, son jour de disparition pour un groupe dissous. Compter sur
+     * `depute.groupe_id` renverrait zéro pour tout groupe dissous et pour
+     * toute législature passée.
+     *
+     * @return array<string, int>
+     */
+    private function effectifsParSigle(int $legislature): array
+    {
+        $effectifs = [];
+
+        foreach ($this->connection->fetchAllKeyValue(
+            'SELECT g.libelle_abrev, COUNT(DISTINCT fg.depute_id) AS effectif
+             FROM groupe g
+             LEFT JOIN fonction_groupe fg ON fg.groupe_id = g.id AND fg.nomin_principale = 1
+                 AND fg.date_debut <= COALESCE(g.date_fin, CURDATE())
+                 AND (fg.date_fin IS NULL OR fg.date_fin >= COALESCE(g.date_fin, CURDATE()))
+             WHERE g.legislature = :legislature
+             GROUP BY g.id',
+            ['legislature' => $legislature],
+        ) as $sigle => $effectif) {
+            $sigle = self::SIGLES_CANONIQUES[$sigle] ?? (string) $sigle;
+            $effectifs[$sigle] = max($effectifs[$sigle] ?? 0, (int) $effectif);
+        }
+
+        return $effectifs;
     }
 
     /**

@@ -602,6 +602,7 @@ class ElectionController extends AbstractController
     {
         $ligne = $this->connection->fetchAssociative(
             'SELECT c.id, c.code_insee, c.nom, c.slug, c.population,
+                    c.maire_prenom, c.maire_nom, c.maire_civilite,
                     d.id AS dpt_id, d.code AS dpt_code, d.nom AS dpt_nom, d.slug AS dpt_slug,
                     d.libelle_de, d.libelle_dans
              FROM commune c

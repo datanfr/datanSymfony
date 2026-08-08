@@ -6,9 +6,20 @@
    les liens de navigation doivent viser `vote_c<n>`. #}
 {% set est_congres = numero_affiche < 0 %}
 
-{% block title %}{{ titre_affiche }} - Vote n°{{ numero_affiche|congress_numero }} - Datan{% endblock %}
+{# Le format du site d'origine (Votes::index, ligne 467) : le numéro d'abord —
+   c'est lui que cherche qui arrive ici —, puis le titre du dossier plutôt que
+   le libellé brut du scrutin (cf. TitreMeta), puis la législature. #}
+{% block title %}Vote n°{{ numero_affiche|congress_numero }} - {{ titre_meta|ucfirst }} - {{ scrutin.legislature }}e législature | Datan{% endblock %}
 
-{% block meta_description %}{{ titre_affiche|striptags|slice(0, 155) }}{% endblock %}
+{% block meta_description %}
+  {%- if explication_en_avant -%}
+    {%- for e in explications -%}
+      {%- if e.mp_id == explication_en_avant -%}Découvrez l'explication de vote de {{ e.firstname }} {{ e.lastname }}.{%- endif -%}
+    {%- endfor -%}
+  {%- else -%}
+    Découvrez le vote des députés sur le scrutin : {{ titre_meta|ucfirst }} - {{ scrutin.legislature }}e législature. Détail et analyse des résultats du vote n° {{ numero_affiche|congress_numero }}.
+  {%- endif -%}
+{% endblock %}
 
 {% block stylesheets %}
   <link rel="stylesheet" type="text/css" href="{{ asset('assets/css/datatables.bootstrap4.min.css') }}">
@@ -40,7 +51,9 @@
       <div class="card card-vote-infos">
         <div class="card-body">
           <span class="num">LÉGISLATURE {{ scrutin.legislature }} - VOTE n° {{ numero_affiche|congress_numero }}</span>
-          <h1 class="title{{ decrypte ? ' mt-2' : '' }}">{{ titre_affiche|capitalize }}</h1>
+          {# ucfirst et non capitalize : capitalize écraserait les majuscules
+             internes (« la NUPES », « M. Aviragnet », « Élisabeth Borne »). #}
+          <h1 class="title{{ decrypte ? ' mt-2' : '' }}">{{ titre_affiche|ucfirst }}</h1>
           <span class="badge sort badge-{{ scrutin.sort_code }} mt-1">{{ scrutin.sort_code|upper }}</span>
         </div>
         <div class="d-flex results">
@@ -150,23 +163,29 @@
         <h2>Infos</h2>
         {{ block('infos_table') }}
       </div>
+      {# Liens externes passés par url_obf comme sur le site : ces sorties vers
+         assemblee-nationale.fr sont volontairement masquées aux robots pour
+         sculpter le crawl — un href en clair les réexposerait. L'icône de lien
+         externe est inline (file_get_contents chez l'origine) pour hériter de
+         la couleur du bouton. #}
       {% if scrutin.dossier_chemin or scrutin.amendement_href %}
         <div class="bloc-savoir-plus d-none d-md-block mt-5">
           <h3 class="subtitle">En savoir plus</h3>
           <div class="bloc-links">
             <div class="d-flex flex-column flex-lg-row">
               {% if scrutin.dossier_chemin %}
-                <a class="d-flex justify-content-center align-items-center btn btn-secondary link my-1 my-lg-0 mx-lg-1 no-decoration"
-                   href="https://www.assemblee-nationale.fr/dyn/{{ scrutin.dossier_legislature }}/dossiers/{{ scrutin.dossier_chemin }}"
-                   target="_blank" rel="noreferrer">
+                <span class="d-flex justify-content-center align-items-center url_obf btn btn-secondary link my-1 my-lg-0 mx-lg-1"
+                      url_obf="{{ url_obf('https://www.assemblee-nationale.fr/dyn/' ~ scrutin.dossier_legislature ~ '/dossiers/' ~ scrutin.dossier_chemin) }}">
+                  <div class="mr-2">{{ source('@public/assets/imgs/icons/arrow_external_right.svg') }}</div>
                   <span class="text">Le dossier</span>
-                </a>
+                </span>
               {% endif %}
               {% if scrutin.amendement_href %}
-                <a class="d-flex justify-content-center align-items-center btn btn-secondary link my-1 my-lg-0 mx-lg-1 no-decoration"
-                   href="{{ scrutin.amendement_href }}" target="_blank" rel="noreferrer">
+                <span class="d-flex justify-content-center align-items-center url_obf btn btn-secondary link my-1 my-lg-0 mx-lg-1"
+                      url_obf="{{ url_obf(scrutin.amendement_href) }}">
+                  <div class="mr-1">{{ source('@public/assets/imgs/icons/arrow_external_right.svg') }}</div>
                   <span class="text">L'amendement</span>
-                </a>
+                </span>
               {% endif %}
             </div>
           </div>
@@ -432,6 +451,30 @@
           {% endif %}
         </div>
       {% endif %}
+      {# Variante mobile du bloc « En savoir plus » de la colonne de droite,
+         qui est en d-none d-md-block : sur téléphone, le site répète les
+         boutons ici, sans l'icône de lien externe. #}
+      {% if scrutin.dossier_chemin or scrutin.amendement_href %}
+        <div class="bloc-savoir-plus d-md-none mt-5">
+          <h3 class="subtitle">En savoir plus</h3>
+          <div class="bloc-links">
+            <div class="d-flex flex-column flex-lg-row">
+              {% if scrutin.dossier_chemin %}
+                <span class="d-flex justify-content-center align-items-center url_obf btn btn-secondary link my-1 my-lg-0 mx-lg-1"
+                      url_obf="{{ url_obf('https://www.assemblee-nationale.fr/dyn/' ~ scrutin.dossier_legislature ~ '/dossiers/' ~ scrutin.dossier_chemin) }}">
+                  <span class="text">Le dossier</span>
+                </span>
+              {% endif %}
+              {% if scrutin.amendement_href %}
+                <span class="d-flex justify-content-center align-items-center url_obf btn btn-secondary link my-1 my-lg-0 mx-lg-1"
+                      url_obf="{{ url_obf(scrutin.amendement_href) }}">
+                  <span class="text">L'amendement</span>
+                </span>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+      {% endif %}
     </div>
   </div>
 </div>
@@ -519,7 +562,7 @@
           <td class="icon"><svg width="1em" height="1em" viewBox="0 0 16 16" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M3 0h10a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2v-1h1v1a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1H3a1 1 0 0 0-1 1v1H1V2a2 2 0 0 1 2-2z"/><path d="M1 5v-.5a.5.5 0 0 1 1 0V5h.5a.5.5 0 0 1 0 1h-2a.5.5 0 0 1 0-1H1zm0 3v-.5a.5.5 0 0 1 1 0V8h.5a.5.5 0 0 1 0 1h-2a.5.5 0 0 1 0-1H1zm0 3v-.5a.5.5 0 0 1 1 0v.5h.5a.5.5 0 0 1 0 1h-2a.5.5 0 0 1 0-1H1z"/></svg></td>
           <td class="label d-none d-lg-table-cell">Type de vote</td>
           <td class="value">
-            {{ type_edito.libelle|capitalize }}
+            {{ type_edito.libelle|ucfirst }}
             {% if type_edito.explication %}
               <a class="ml-1 no-decoration" tabindex="0" role="button" data-toggle="popover" data-trigger="focus" data-html="true"
                  aria-label="Explication du type de vote" data-content="{{ type_edito.explication }}">
@@ -563,11 +606,18 @@
       data: {
         labels: ['Pour', 'Abstention', 'Contre'],
         datasets: [{
+          label: 'Nombre de votes',
           data: [{{ scrutin.nombre_pour }}, {{ scrutin.nombre_abstentions }}, {{ scrutin.nombre_contre }}],
-          backgroundColor: ['#00B794', '#FFAD29', '#C5283D']
+          {# #FFBA49 et non le #FFAD29 du bandeau : le site utilise les deux
+             jaunes, celui-ci pour le camembert (views/votes/individual.php). #}
+          backgroundColor: ['#00B794', '#FFBA49', '#C5283D']
         }]
       },
-      options: { plugins: { legend: { display: false } } }
+      {# datalabels désactivé explicitement : le plugin est enregistré
+         globalement dans le bundle Chart.js — sans cette option, le nombre de
+         « pour » s'imprime au milieu de la part verte, ce que le site ne fait
+         pas. #}
+      options: { plugins: { legend: { display: false }, datalabels: { display: false } } }
     });
   </script>
 {% endblock %}

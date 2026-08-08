@@ -47,7 +47,24 @@ class DatanExtension extends AbstractExtension
             new TwigFilter('date_abregee', $this->dateAbregee(...)),
             new TwigFilter('rang_circo', $this->rangCirco(...)),
             new TwigFilter('mois_abrege', $this->moisAbrege(...)),
+            new TwigFilter('ucfirst', $this->ucfirst(...)),
         ];
+    }
+
+    /**
+     * Première lettre en capitale, le reste intact — l'équivalent du
+     * `ucfirst()` que l'application d'origine applique aux titres de scrutin.
+     *
+     * Ne pas remplacer par le `capitalize` de Twig : celui-ci passe tout le
+     * reste en minuscules et écrase les noms propres — « Motion de censure de
+     * la NUPES contre le gouvernement d'Élisabeth Borne » devenait « … de la
+     * nupes … d'élisabeth borne ».
+     */
+    public function ucfirst(?string $texte): string
+    {
+        $texte = (string) $texte;
+
+        return mb_strtoupper(mb_substr($texte, 0, 1)) . mb_substr($texte, 1);
     }
 
     /**

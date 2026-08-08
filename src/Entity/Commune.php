@@ -67,6 +67,25 @@ class Commune
     private ?Departement $departement = null;
 
     /**
+     * Maire de la commune, en trois colonnes plutôt qu'une entité : le site
+     * n'en affiche que le nom et n'a besoin de la civilité que pour accorder
+     * « le / la maire ». 34 874 communes sur 35 720 en ont un — les absentes
+     * sont surtout des communes fusionnées.
+     *
+     * Le nom arrive en capitales du référentiel (« FABRE ») et s'affiche en
+     * casse mixte ; on stocke la graphie de la source, comme pour le reste.
+     */
+    #[ORM\Column(length: 100, nullable: true)]
+    private ?string $mairePrenom = null;
+
+    #[ORM\Column(length: 100, nullable: true)]
+    private ?string $maireNom = null;
+
+    /** « M » ou « F », tel que le référentiel l'écrit. */
+    #[ORM\Column(length: 1, nullable: true)]
+    private ?string $maireCivilite = null;
+
+    /**
      * Communes limitrophes, servant la barre de navigation en haut de la fiche.
      * La relation est déclarée dans un seul sens mais la table porte les deux
      * couples : l'application d'origine les stocke ainsi et la lecture se fait
@@ -180,6 +199,42 @@ class Commune
     public function setDepartement(?Departement $departement): static
     {
         $this->departement = $departement;
+
+        return $this;
+    }
+
+    public function getMairePrenom(): ?string
+    {
+        return $this->mairePrenom;
+    }
+
+    public function setMairePrenom(?string $mairePrenom): static
+    {
+        $this->mairePrenom = $mairePrenom;
+
+        return $this;
+    }
+
+    public function getMaireNom(): ?string
+    {
+        return $this->maireNom;
+    }
+
+    public function setMaireNom(?string $maireNom): static
+    {
+        $this->maireNom = $maireNom;
+
+        return $this;
+    }
+
+    public function getMaireCivilite(): ?string
+    {
+        return $this->maireCivilite;
+    }
+
+    public function setMaireCivilite(?string $maireCivilite): static
+    {
+        $this->maireCivilite = $maireCivilite;
 
         return $this;
     }

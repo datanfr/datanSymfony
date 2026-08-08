@@ -46,12 +46,18 @@ class ElectionRepository extends ServiceEntityRepository
      */
     public function toutes(): array
     {
+        // Les COALESCE ne sont pas décoratifs : SUM() rend NULL quand aucune
+        // ligne ne matche — élection sans candidature — mais aussi quand `elu`
+        // vaut NULL sur toutes les lignes, ce qui est le cas de la
+        // présidentielle (aucun candidat n'y est « élu député », l'issue reste
+        // non renseignée). La carte affichait alors «  député élu », chiffre
+        // vide ; le site écrit SUM(CASE … ELSE 0) et montre « 0 député élu ».
         $elections = $this->getEntityManager()->getConnection()->fetchAllAssociative(
             'SELECT e.id, e.identifiant, e.slug, e.libelle, e.libelle_abrege, e.annee,
                     e.date_tour1, e.date_tour2, e.candidats, e.url_resultats,
                     COUNT(c.id) AS candidats_n,
-                    SUM(c.second_tour = 1) AS second_tour_n,
-                    SUM(c.elu = 1) AS elus_n
+                    COALESCE(SUM(c.second_tour = 1), 0) AS second_tour_n,
+                    COALESCE(SUM(c.elu = 1), 0) AS elus_n
              FROM election e
              LEFT JOIN candidature c ON c.election_id = e.id AND c.visible = 1 AND c.candidat = 1
              GROUP BY e.id
@@ -59,7 +65,7 @@ class ElectionRepository extends ServiceEntityRepository
         );
 
         foreach ($elections as &$election) {
-            $election['etat'] = $this->etat($election['date_tour1'], $election['date_tour2']);
+            $election['etat'] = $this->etat((int) $election['identifiant']);
         }
 
         return $elections;
@@ -79,36 +85,37 @@ class ElectionRepository extends ServiceEntityRepository
             return null;
         }
 
-        $election['etat'] = $this->etat($election['date_tour1'], $election['date_tour2']);
+        $election['etat'] = $this->etat((int) $election['identifiant']);
 
         return $election;
     }
 
     /**
-     * État d'avancement du scrutin, déduit de ses dates.
+     * État d'avancement du scrutin — figé par élection, comme dans
+     * l'application d'origine (`Elections_model::get_election_state()`).
      *
-     * L'application d'origine le donne par un `switch` sur l'identifiant du
-     * scrutin (`Elections_model::get_election_state()`), qu'il faut rallonger à
-     * chaque élection. Les dates disent la même chose et n'ont pas à être
-     * tenues : les six scrutins connus sont achevés, et le prochain le deviendra
-     * sans qu'on y touche.
+     * Une première version le déduisait des dates, pour n'avoir rien à tenir à
+     * jour. C'était une erreur : l'état n'est pas une fonction du calendrier
+     * mais une décision de la rédaction, qui dit si les résultats ont été
+     * dépouillés dans la base. Les municipales de 2026 sont passées depuis
+     * mars, et le site les tient pourtant à 0 — sa page continue de présenter
+     * les 337 députés candidats, faute d'avoir traité les résultats (c'est son
+     * chantier en cours, hors de ce portage). Les dates les déclaraient
+     * « achevées » ici, et la carte du catalogue basculait sur un décompte
+     * d'élus qui n'existe pas.
      *
-     * Un scrutin à tour unique — les européennes — n'a pas de `date_tour2` :
-     * c'est le premier tour qui l'achève.
+     * Toute élection hors catalogue vaut 0, comme le `default` du legacy ; on
+     * ne passe une élection à 2 qu'en même temps que l'import de ses résultats.
      */
-    private function etat(?string $tour1, ?string $tour2): int
+    private function etat(int $identifiant): int
     {
-        $aujourdhui = (new \DateTimeImmutable('today'))->format('Y-m-d');
-        $dernierTour = $tour2 ?? $tour1;
-
-        if ($dernierTour !== null && $dernierTour < $aujourdhui) {
-            return self::ACHEVE;
-        }
-
-        if ($tour1 !== null && $tour1 < $aujourdhui) {
-            return self::PREMIER_TOUR;
-        }
-
-        return self::ATTENDU;
+        return match ($identifiant) {
+            // Régionales et départementales 2021, présidentielle et
+            // législatives 2022, européennes et législatives 2024.
+            1, 2, 3, 4, 5, 6 => self::ACHEVE,
+            // Municipales 2026 : résultats non dépouillés par la rédaction.
+            7 => self::ATTENDU,
+            default => self::ATTENDU,
+        };
     }
 }

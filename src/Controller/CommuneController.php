@@ -165,6 +165,7 @@ class CommuneController extends AbstractController
     {
         $ligne = $this->connection->fetchAssociative(
             'SELECT c.id, c.code_insee, c.nom, c.slug, c.population, c.population2012, c.code_postal,
+                    c.maire_prenom, c.maire_nom, c.maire_civilite,
                     d.id AS dpt_id, d.code AS dpt_code, d.nom AS dpt_nom, d.slug AS dpt_slug,
                     d.libelle_dans, d.libelle_de, d.region
              FROM commune c

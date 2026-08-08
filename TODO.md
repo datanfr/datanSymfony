@@ -14,70 +14,97 @@ HTML avant de conclure.
 
 ## P0 — Contrat d'URL (bloquant : des URL indexées rendent 404)
 
-- [ ] **Commune « Faux » (Dordogne) importée sous le slug « 0 ».**
-  `/elections/resultats/dordogne-24/ville_faux` → 404 ; la page existe sous
-  `/…/ville_0` avec « Résultats des élections à 0 » en title/h1/breadcrumb, et le
-  sitemap annonce `ville_0`. Cause quasi certaine : « faux » converti en booléen
-  puis casté en chaîne quelque part (import des communes ou génération du slug).
-  - Corriger la source (slug + nom en base), pas seulement la route.
-  - Vérifier : `ville_faux` → 200 avec « Faux » partout ; `ville_0` → 404 ou 301 ;
-    le sitemap `elections-v` n'annonce plus `ville_0` ; chercher d'autres victimes
-    du même cast (`SELECT * FROM commune WHERE nom IN ('0','1','') OR slug IN ('0','1','')`).
+- [x] **Commune « Faux » (Dordogne) importée sous le slug « 0 ».** — *Fait le
+  2026-08-08.* La corruption venait du **dump** (les deux communes « Faux »,
+  08165 et 24177, y portent `commune_nom = '0'` : « Faux » est le libellé
+  français du booléen FALSE, converti par un aller-retour tableur ; la vraie
+  prod sert bien `ville_faux`). Corrigé aux trois niveaux : requête d'export
+  auto-réparante via `cities.nom_standard` (docblock d'`ImportCommunesCommand`),
+  garde dans l'import qui refuse toute ligne sans lettre (avec bilan chiffré),
+  données locales réparées, TSV régénéré et import rejoué. Vérifié : sitemap
+  local annonce `ville_faux`, plus aucun `ville_0`, 0 commune corrompue en base.
+  **Reste : redéployer + rejouer l'import sur le staging.**
 
-- [ ] **Slugs de communes à article parenthésé : poser des 301.**
-  `/elections/resultats/jura-39/ville_etoile` et
-  `/elections/resultats/ardeche-07/ville_nonieres` répondent 200 sur le legacy
-  (et sont liées depuis ses pages département) mais 404 sur le staging, qui ne
-  connaît que `ville_etoile-(l)` et `ville_nonieres-(les)`. Une URL legacy ne rend
-  jamais 404 : rediriger en 301 vers la forme du staging, sur le modèle de
-  `DepartementController::versLAdresseCanonique()`.
-  - Le legacy est incohérent avec lui-même (il garde « (les) » pour Assions mais le
-    retire pour Nonières) : recenser TOUTES les communes dont le slug legacy diffère
-    du slug staging (diff des sitemaps `elections-v` + `localites-v`) et couvrir la
-    liste entière, pas seulement ces deux-là.
-  - Nota : `ville_assions-(les)` et `ville_bonvillers-(mont)` étaient inaccessibles
-    sur le legacy lui-même (400 CodeIgniter) : leur fonctionnement en staging est une
-    correction assumée, rien à faire.
+- [x] **Slugs de communes à article parenthésé.** — *Fait le 2026-08-08, sans
+  301 : alignement des données sur les adresses que la prod sert.* Recensement
+  complet des 24 communes à slug parenthésé : seules **Étoile (L')** (39217 →
+  `etoile`) et **Nonières (Les)** (07165 → `nonieres`) divergent — la prod a
+  nettoyé ces deux slugs après la prise de notre dump (vérifié sur les pages
+  département de datan.fr, qui font foi). `CASE` posé dans la requête d'export
+  (docblock d'`ImportCommunesCommand`), données alignées, sitemap vérifié.
+  Assions, Ollières-sur-Eyrieux et Bonvillers gardent leurs parenthèses (la prod
+  les lie ainsi mais les refuse en 400 — aucun contrat à honorer) ; les 19
+  autres ne sont liées nulle part sur datan.fr.
+  **Reste : redéployer + rejouer l'import sur le staging.**
 
 ## P1 — Fiches vote : title et casse du h1 (18 311 pages, SEO)
 
-- [ ] **Reprendre le gabarit `<title>` du legacy.**
-  Legacy : `Vote n°997 - Vote final - <titre> - 17e législature | Datan` ;
-  staging : `<titre brut> - Vote n°997 - Datan` (avec le titre en minuscule
-  initiale). Reproduire le format legacy, y compris le segment « Vote final - »
-  quand il y est et le suffixe « Ne législature | Datan ».
-- [ ] **Retirer le `|capitalize` (ou équivalent) du h1.**
-  Twig `capitalize` écrase les majuscules internes : « Motion de censure de la
-  **nupes** contre le gouvernement d'**élisabeth borne** » (vote_1 L16),
-  « l'amendement de **m. aviragnet** » (vote_100 L15). Le legacy rend le titre tel
-  quel avec une majuscule initiale : utiliser un `ucfirst` qui ne touche pas au
-  reste.
-  - Vérifier sur : vote_1 L16 (NUPES, Élisabeth Borne), vote_100 L15 (M. Aviragnet),
-    vote_997 L17 (déjà tout en minuscules : ne doit pas bouger), vote_1243 L16.
+- [x] **Reprendre le gabarit `<title>` du legacy.** — *Fait le 2026-08-08.*
+  Nouvelle classe `App\TitreMeta` : portage du CASE SQL de
+  `Votes_model::get_individual_vote()` (Vote final / Motion de renvoi /
+  Amendement n°X / Article n°X + titre du dossier), avec extraction des numéros
+  d'amendement et d'article depuis le libellé comme `daily.php:1788-1810` (les
+  colonnes `amdt`/`article` n'ont pas été portées en base). La meta description
+  reprend aussi le format legacy (« Découvrez le vote des députés sur le
+  scrutin : … », variante explication de vote). Vérifié identique au caractère
+  près sur : vote_1 L16 (Motion de censure), vote_100 L15 (amendement sans
+  dossier), vote_997 L17 (Vote final), vote_8426 (Amendement n°1),
+  vote_8415 (Article n°13), vote_c1 L16 (Congrès).
+- [x] **Retirer le `|capitalize` du h1.** — *Fait le 2026-08-08.* Filtre Twig
+  `ucfirst` ajouté à `DatanExtension` (première lettre seulement, multi-octets),
+  appliqué au h1 et au « Type de vote » de l'encart Infos. « La NUPES »,
+  « M. Aviragnet », « Élisabeth Borne » gardent leurs majuscules ; vote_997
+  (déjà tout en minuscules) inchangé.
 
 ## P1 — Données de production en retard ou non portées
 
-- [ ] **Rejouer `app:import:explications`** contre la vraie base : les 3 cartes
-  « Dernières explications de vote » de l'accueil datent d'avant l'import
-  (et le staging affiche 2× Maxime Laisney).
-- [ ] **Rattraper les décryptages postérieurs au 2026-07-09** : il en manque 2
-  (acétamipride 20 juil., aide à mourir 15 juil. 2026) — 238 vs 240. Visible sur
-  l'accueil, `/votes`, `/votes/decryptes`, `/soutenir` et les carrousels.
-  Contenu éditorial non régénérable : import de récupération, jamais en cron.
-- [ ] **Décider et porter la table des maires.** « Le maire de X est Y. » manque sur
-  toutes les pages commune, et la ligne « 🏛️ Maire » manque dans l'encadré des pages
-  résultats. L'omission est documentée dans `templates/departement/commune.html.twig`
-  (table vide dans la base de dev). Récupérer l'export TSV depuis la prod (docblock
-  `docker exec` à poser sur la commande d'import) ou assumer l'absence — mais le
-  legacy l'affiche, donc parité = la porter.
+**Source découverte le 2026-08-08** : le jeu public
+`datan.fr/assets/dataset_backup/general/latest.sql` (195 Mo, daté du 31 juillet
+2026) est bien plus complet que ne le disait `CLAUDE.md` — il porte
+`cities_mayors` en entier (34 874 lignes), les 240 décryptages publiés et 47
+explications. Chargé dans le conteneur (`datan_backup`), il a servi à tous les
+rattrapages ci-dessous. Rester prudent : c'est un instantané au 31 juillet et
+les comptes y sont anonymisés — **au déploiement, tout se rejoue contre la
+vraie base**.
+
+- [x] **Explications de vote rattrapées.** — *Fait le 2026-08-08.* 47 importées
+  (42 publiées, contre 40 avant). Export TSV régénéré depuis le jeu public.
+  Reste l'écart de fraîcheur : la prod du 8 août en a de plus récentes que
+  l'instantané du 31 juillet, **à rejouer au déploiement**.
+- [x] **Décryptages rattrapés.** — *Fait le 2026-08-08.* Les 2 manquants
+  (acétamipride 8427, aide à mourir 8280) sont importés : 252 en base, **240
+  publiés — le compte exact du legacy**. Vérifié : `/votes/decryptes` affiche
+  « 62 votes… » et 12 vignettes Agriculture, identiques à datan.fr ; l'accueil
+  et les carrousels ressortent vote_8427 et vote_8280.
+  *Méthode* : `ImportDecryptagesCommand` attend une connexion PDO et le
+  conteneur refuse les connexions hors localhost ; les trois tables source
+  (`votes_datan`, `fields`, `readings`) ont donc été chargées temporairement
+  dans `datan_symfony`, l'import lancé dessus, puis les tables supprimées
+  (schéma revérifié « in sync »).
+- [x] **Table des maires portée.** — *Fait le 2026-08-08.* Elle n'était pas
+  perdue, seulement vide dans la copie de travail. Migration
+  `Version20260808090000` (3 colonnes sur `commune`), import via
+  `app:import:communes --maires` (requête d'export au docblock), **34 865
+  communes avec maire**. Affichage rétabli aux deux endroits : « Le maire
+  d'Ajaccio est Stéphane Sbraggia. » sur les fiches de ville et la ligne
+  « 🏛️ Maire » de l'encadré des pages résultats. L'élision est corrigée
+  (`ville.de`) par cohérence avec le reste de la page. La correction manuelle du
+  legacy (Berre-l'Étang, SALVO → Doriol) n'est pas portée : son référentiel a
+  été mis à jour depuis et elle ne se déclenche plus.
+- [x] **Images in-article du blog récupérées.** — *Fait le 2026-08-08.*
+  17 fichiers rapatriés sous `public/assets/imgs/posts/inside/`, sous-dossiers
+  compris (`2025_classement/`, `interview_lebras/`) — recensés en cherchant les
+  URL dans le corps des articles, pas seulement celles d'un article. Tous
+  répondent 200 en local.
+  - [ ] **Reste** : les corps d'articles référencent ces images en **absolu**
+    vers `https://datan.fr`. Tant que le domaine ne bascule pas, elles se
+    chargent depuis la prod ; à la bascule, elles se chargeront des fichiers
+    locaux. Vérifier ce jour-là. (16 articles portent des liens absolus
+    `datan.fr`, images et liens internes confondus.)
 - [ ] **Porter la section « Ses professions de foi » des fiches député** (tableaux
   législatives 2024/2022, boutons « Profession 1er/2nd tour »). Section entière
-  absente du staging (~460 px). Vérifier d'où le legacy tire les fichiers PDF/liens.
-- [ ] **Déployer les images in-article du blog** : `/assets/imgs/posts/inside/*.png`
-  → 404 sur le staging. Invisible aujourd'hui (le HTML stocké des articles pointe en
-  absolu vers `https://datan.fr`) mais tout casse à la bascule de domaine.
-  Copier le répertoire depuis la prod, puis vérifier chaque `posts/inside/` référencé
-  par un article → 200.
+  absente du staging (~460 px). Vérifier d'où le legacy tire les fichiers PDF/liens
+  — regarder du côté de `datan_backup` (le jeu public a peut-être la table).
 
 ## P1 — Statistiques : écarts de calcul à instruire un par un
 
@@ -120,11 +147,16 @@ Pour chacun : comprendre la règle du legacy (la réponse est dans son code, sou
 
 ## P1 — Page /elections et pages résultats
 
-- [ ] **Bug de gabarit des cartes d'élection** : valeur nulle rendue en chaîne vide
-  avec bascule de libellé — Municipales : « 337 députés candidats » (legacy) →
-  «  député élu » (staging) ; Présidentielle : « 0 député élu » → «  député élu ».
-  Afficher le bon chiffre (les candidatures municipales ne sont pas importées :
-  décider quoi afficher en attendant) et le bon libellé, ne jamais rendre vide.
+- [x] **Bug de gabarit des cartes d'élection.** — *Fait le 2026-08-08.* Deux
+  causes dans `ElectionRepository` : `SUM(c.elu = 1)` rendait NULL quand `elu`
+  n'est renseigné nulle part (présidentielle, municipales) → `COALESCE(…, 0)`
+  comme le `SUM(CASE … ELSE 0)` du legacy ; et l'état était déduit des dates
+  alors que le legacy le **fige à la main** par élection
+  (`get_election_state()`) — les municipales 2026, passées mais non dépouillées,
+  basculaient à tort sur le décompte d'élus. État figé porté (1-6 → achevé,
+  7 → attendu, défaut attendu). Vérifié : « 337 députés candidats »
+  (municipales), « 0 député élu » (présidentielle), 1/422/292/47 élus, pied
+  vide des départementales — tout identique au legacy.
 - [ ] **Section « Les prochaines élections en France » absente** du staging.
   Le texte legacy est périmé (dates de mars 2026 au futur) : reconstruire la section
   avec un contenu juste plutôt que la laisser tomber.
@@ -157,6 +189,37 @@ Pour chacun : comprendre la règle du legacy (la réponse est dans son code, sou
   `/legislature-N`, inactifs L14-16, `/votes/all` retirés des inactifs) : rien à
   faire, mais vérifier par échantillon que tout ce qui est annoncé répond 200.
 
+## P2 — Lot de gabarits — *fait le 2026-08-08*
+
+- [x] **Boutons « Voir les derniers votes » / « Tous les votes »** de l'accueil :
+  repointés sur `/votes` (le legacy) au lieu de `/votes/legislature-17`.
+- [x] **Meta description des archives mensuelles** : les trois formulations du
+  legacy sont portées (mois, année, législature) — « en juin 2024 » revient, et
+  les variantes courtes ne mentionnent plus la participation, comme chez lui.
+- [x] **Tooltip de l'hémicycle** : « Députés non inscrits (NI) », via le
+  `CASE WHEN libelle = 'Non inscrit'` que le legacy applique dans tout son
+  `Groupes_model`.
+- [x] **Camembert de la fiche vote** : étiquette « 113 » supprimée
+  (`datalabels: {display: false}`, que le legacy pose explicitement) et jaune
+  aligné sur le sien (#FFBA49, distinct du #FFAD29 du bandeau).
+- [x] **Boutons « Le dossier » / « L'amendement »** : icône de lien externe
+  rétablie, et liens passés par `url_obf` comme le legacy — ces sorties vers
+  assemblee-nationale.fr étaient exposées en clair aux robots.
+  Variante mobile du bloc « En savoir plus » ajoutée (elle manquait).
+- [x] **Bulle d'aide « ? »** du titre « Les coalitions les plus fréquentes »
+  rétablie (le legacy y réutilise le popover du taux de proximité).
+- [x] **Badges de coalition** rangés par effectif décroissant (RN, EPR, DR,
+  DEM…) et non alphabétiquement — c'est le `uasort` de `format_coalitions()`.
+  L'effectif se compte sur `fonction_groupe`, valable aussi pour un groupe
+  dissous.
+- [x] **« Polynésie Française » → « Polynésie française »** : l'Assemblée
+  surcapitalise l'adjectif, la table `departement` du site a la bonne graphie —
+  exception posée dans l'import, qui préfère sinon l'orthographe de l'Assemblée.
+- [x] **Ordre des logos de « La position des groupes »** : conservé par effectif
+  décroissant, **divergence assumée et commentée** — la requête du legacy n'a
+  aucun `ORDER BY` et son ordre est celui, arbitraire, des lignes de sa table
+  `organes` (vérifié). Un accident de stockage ne se reproduit pas.
+
 ## P2 — Typographie et casse transverses
 
 - [ ] **Séparateur décimal** : le staging affiche la virgule (0,86 ; 4,4 %) là où le
@@ -164,34 +227,15 @@ Pour chacun : comprendre la règle du legacy (la réponse est dans son code, sou
   évolutions de population). La virgule est le bon usage français mais s'écarte de la
   parité : trancher une fois pour tout le site et commenter. (Incohérence actuelle :
   « 51.7 ans » garde le point des deux côtés.)
-- [ ] **« Polynésie Française » → « Polynésie française »** : la règle de
-  capitalisation du staging surcorrige un adjectif ; le legacy avait raison ici.
-  Régression à corriger dans le formateur de noms de départements.
-- [ ] Capitalisations gardées (« Val-d'Oise », « Côtes-d'Armor », « 2A »/« 2B ») :
-  corrections assumées du legacy — vérifier juste qu'un commentaire le dit.
+- [x] Capitalisations gardées (« Val-d'Oise », « Côtes-d'Armor », « 2A »/« 2B ») :
+  corrections assumées du legacy — commentées dans `ImportCommunesCommand`.
 
 ## P2 — Divers pages et gabarits
 
-- [ ] **Boutons de l'accueil** « Voir les derniers votes » / « Tous les votes » :
-  staging → `/votes/legislature-17`, legacy → `/votes`. Aligner sur `/votes` (parité,
-  et c'est l'URL du menu).
-- [ ] **Meta description des pages d'archives mensuelles** : remettre la spécificité
-  du mois (« en juin 2024 ») au lieu de la description générique de législature.
 - [ ] **Section campagne de dons (`#campaign`)** : inclusion incohérente — absente de
   `/votes` côté staging (présente côté legacy), présente sur les pages mois côté
   staging (absente côté legacy), position différente sur les pages commune. Décider
   la liste des pages porteuses et l'emplacement, puis harmoniser.
-- [ ] **Camembert « Résultat du vote »** : étiquette « 113 » affichée dans la part
-  verte côté staging, aucune côté legacy. Retirer l'étiquette.
-- [ ] **Bouton « Le dossier »** : icône de lien externe manquante côté staging.
-- [ ] **Bulle d'aide « ? »** du titre « Les coalitions les plus fréquentes »
-  manquante côté staging.
-- [ ] **Ordre des logos** dans « La position des groupes » (fiche vote) : le tri
-  legacy est un choix — le retrouver et le reproduire.
-- [ ] **Badges des coalitions** triés alphabétiquement côté staging, ordre politique
-  côté legacy : reproduire l'ordre legacy.
-- [ ] **Tooltip hémicycle** : « Députés non inscrits (NI) » (legacy) vs
-  « Non inscrit (NI) » (staging).
 - [ ] **h2 de `/votes`** : « Derniers votes non-decryptés de l'Assemblée nationale »
   (legacy, inexact et coquillé) vs « Les derniers votes de l'Assemblée nationale »
   (staging). La reformulation est défendable : garder, mais commenter pourquoi.

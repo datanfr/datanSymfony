@@ -68,8 +68,17 @@
         <p>{{ ville.nom }} compte <b>{{ ville.population_arrondie|number_format(0, ',', ' ') }} habitants</b>.
           {%- if ville.evolution %} La population de la commune a <b>{{ ville.evolution.sens }}</b> de {{ ville.evolution.valeur|round(1)|replace({'.': ','}) }} % depuis 10 ans.{% endif %}</p>
       {% endif %}
-      {# Le site nomme ici le maire de la commune. Sa table est vide dans la base
-         dont nous disposons : le paragraphe est laissé de côté plutôt que deviné. #}
+      {# Le nom arrive en capitales du référentiel (« FABRE ») ; le site
+         l'affiche en casse mixte — ucfirst(mb_strtolower()) — et n'accorde que
+         l'article. Un nom composé donne donc « Doriol-kasmadjian » : c'est ce
+         que le site écrit, on ne le corrige pas ici. #}
+      {% if ville.maire_nom %}
+        {# `ville.de` et non « de » en dur : le site écrit « Le maire de
+           Ajaccio », faute d'élision qu'on corrige ici comme dans les autres
+           blocs de la page — sans quoi elle se contredirait d'un paragraphe à
+           l'autre. #}
+        <p>{{ ville.maire_civilite == 'F' ? 'La' : 'Le' }} maire {{ ville.de }}{{ ville.nom }} est <b>{{ ville.maire_prenom }} {{ ville.maire_nom|lower|ucfirst }}</b>.</p>
+      {% endif %}
       {# Le site écrit ici « de » en dur (commune.php:47) et donne « Les
          circonscriptions de Ajaccio », alors qu'il élide correctement dans le
          titre de la même page. C'est une faute d'élision, pas une tournure :

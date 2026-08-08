@@ -179,9 +179,10 @@
                 <div class="label text-uppercase mt-4">👥 Population</div>
                 <div class="value">{{ ville.population|number_format(0, ',', ' ') }}</div>
               {% endif %}
-              {# Le site nomme ici le maire de la commune. Sa table est vide dans
-                 la base dont nous disposons : le bloc est laissé de côté plutôt
-                 que deviné, comme sur la fiche de ville de `/deputes`. #}
+              {% if ville.maire_nom %}
+                <div class="label text-uppercase mt-3">🏛️ Maire</div>
+                <div class="value">{{ ville.maire_prenom }} {{ ville.maire_nom|lower|ucfirst }}</div>
+              {% endif %}
               {# Sous le seuil des fiches de ville de `/deputes`, l'adresse est
                  masquée aux robots, comme partout où le site mène à une petite
                  commune (results_city.php:605). #}
