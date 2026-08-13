@@ -241,9 +241,13 @@
                     </div>
                   </div>
                   <div class="col-12 d-flex justify-content-between mt-2">
+                    {# Les sigles d'alliance électorale sont raccourcis dans cette
+                       légende, comme sur l'accueil et dans les classements de la
+                       page statistiques : c'est le `remove_nupes()` du site. #}
+                    {% set abreges = {'LFI-NFP': 'LFI', 'LFI-NUPES': 'LFI', 'GDR-NUPES': 'GDR'} %}
                     {% for g in soutien_groupes %}
                       <div class="legend-element d-flex align-items-center justify-content-center">
-                        <span class="font-weight-bold text-center tooltipHelp tooltipDashed" data-toggle="tooltip" data-placement="top" title="{{ g.libelle|name_group }}">{{ g.libelle_abrev }}</span>
+                        <span class="font-weight-bold text-center tooltipHelp tooltipDashed" data-toggle="tooltip" data-placement="top" title="{{ g.libelle|name_group }}">{{ abreges[g.libelle_abrev]|default(g.libelle_abrev) }}</span>
                       </div>
                     {% endfor %}
                   </div>

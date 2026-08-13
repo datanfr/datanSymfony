@@ -63,8 +63,6 @@
             <th scope="col">Amendement</th>
             <th scope="col">Titre IA</th>
             <th scope="col">Résumé IA</th>
-            <th scope="col" class="text-right">Votants</th>
-            <th scope="col" class="text-right">Disparité</th>
             <th scope="col" class="text-right">Intérêt</th>
             <th scope="col" class="text-center">Simplicité</th>
             <th scope="col" class="text-center">Relu</th>
@@ -75,13 +73,11 @@
           {% for ligne in lignes %}
             <tr class="{{ ligne.relu ? 'ligne-relue' }}">
               <td>
-                <div>{{ ligne.titre|length > 120 ? (ligne.titre|slice(0, 120) ~ '…') : ligne.titre }}</div>
+                <div><a href="{{ lien_vote(ligne.legislature, ligne.numero) }}" target="_blank" rel="noopener">{{ ligne.titre|length > 120 ? (ligne.titre|slice(0, 120) ~ '…') : ligne.titre }}</a></div>
                 <small class="text-muted">Leg. {{ ligne.legislature }} · n° {{ ligne.numero }} · {{ ligne.date_scrutin|date('d/m/Y') }}</small>
               </td>
               <td>{{ ligne.titre_ia ?: '—' }}</td>
               <td class="cellule-resume"><span class="resume">{{ ligne.resume_ia ?: '—' }}</span></td>
-              <td class="text-right">{{ ligne.votants ?? '—' }}</td>
-              <td class="text-right">{{ ligne.disparite is not null ? ligne.disparite ~ ' %' : '—' }}</td>
               <td class="text-right">{{ ligne.interet is not null ? ligne.interet ~ ' %' : '—' }}</td>
               {# Note de simplicité, comme dans l'application d'origine : badge « n/5 »
                  coloré aux mêmes seuils (4-5 vert, 3 orange, 1-2 rouge). Son
@@ -97,11 +93,9 @@
                 <td class="text-center text-muted" title="Résumé pas encore généré, ou repris de la production sans sa note">—</td>
               {% endif %}
               <td class="text-center">
-                {% if ligne.amendement_id %}
-                  <input type="checkbox" class="case-relu" data-amendement="{{ ligne.amendement_id }}" {{ ligne.relu ? 'checked' }}>
-                {% else %}
-                  <span class="text-muted" title="Aucun résumé rattaché à ce vote">—</span>
-                {% endif %}
+                {# La liste ne retient que les votes rattachés à leur amendement :
+                   la case a toujours un identifiant à porter. #}
+                <input type="checkbox" class="case-relu" data-amendement="{{ ligne.amendement_id }}" {{ ligne.relu ? 'checked' }}>
               </td>
               <td class="text-right">
                 {# « Décrypter » : le service PoliticAnalysis étant internalisé, le
@@ -113,7 +107,7 @@
               </td>
             </tr>
           {% else %}
-            <tr><td colspan="9" class="text-center p-4">
+            <tr><td colspan="7" class="text-center p-4">
               Aucun amendement à relire sur cette période. Élargissez la période ou les dates.
             </td></tr>
           {% endfor %}

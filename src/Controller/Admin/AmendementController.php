@@ -47,14 +47,6 @@ class AmendementController extends AbstractController
     private const PERIODES = ['all', '7', '30', '90', '180', '365'];
     private const PERIODE_DEFAUT = '30';
 
-    /**
-     * Natures de vote retenues, pendant du `voteType IN ('amendement','les amen')`
-     * du legacy. Notre classement ({@see \App\NatureVote}) distingue le
-     * sous-amendement de l'amendement : les deux sont des relectures d'amendement,
-     * on prend l'un et l'autre.
-     */
-    private const NATURES = ['amendement', 'sous-amendement'];
-
     public function __construct(
         private readonly Connection $connection,
         private readonly EntityManagerInterface $entityManager,
@@ -90,31 +82,29 @@ class AmendementController extends AbstractController
                     s.numero,
                     s.date_scrutin,
                     COALESCE(NULLIF(s.titre, ''), NULLIF(s.objet, ''), s.uid) AS titre,
-                    s.nombre_votants AS votants,
                     a.id AS amendement_id,
                     a.titre_ia,
                     a.resume_ia,
                     a.simplicite_ia,
                     COALESCE(a.resume_relu, 0) AS relu,
-                    -- Écart de position adopté/rejeté, en points (daily.php) ; NULLIF
-                    -- garde d'une division par zéro sur un scrutin sans votant.
-                    ROUND(ABS(s.nombre_pour - s.nombre_contre) * 100 / NULLIF(s.nombre_votants, 0), 1) AS disparite,
                     -- « Intérêt » du scrutin : d'autant plus fort qu'il a mobilisé et
-                    -- qu'il fut serré (même formule que le legacy).
+                    -- qu'il fut serré (même formule que le legacy) ; NULLIF garde
+                    -- d'une division par zéro sur un scrutin sans votant.
                     ROUND(LEAST(s.nombre_votants / 250, 1) * (1 - ABS(s.nombre_pour - s.nombre_contre) / NULLIF(s.nombre_votants, 0)) * 100, 1) AS interet
                 FROM scrutin s
-                LEFT JOIN amendement a ON a.id = s.amendement_id
+                -- Seuls les votes rattachés à leur amendement entrent dans la file :
+                -- la relecture s'enregistre sur l'amendement, impossible sans lui.
+                -- Le legacy filtrait par type de vote ; il est passé à cette jointure
+                -- stricte, qui écarte les quelques votes d'amendement sans lien connu.
+                INNER JOIN amendement a ON a.id = s.amendement_id
                 -- Un vote déjà décrypté sort de la file de relecture (vd.id IS NULL du legacy).
                 LEFT JOIN decryptage d ON d.scrutin_id = s.id
-                WHERE s.nature_vote IN (:natures)
-                  AND s.legislature = :legislature
+                WHERE s.legislature = :legislature
                   AND d.id IS NULL";
 
         $params = [
-            'natures' => self::NATURES,
             'legislature' => $legislature,
         ];
-        $types = ['natures' => \Doctrine\DBAL\ArrayParameterType::STRING];
 
         // Dates explicites prioritaires sur la période, comme dans le legacy.
         if ($dateDebut !== null || $dateFin !== null) {
@@ -135,9 +125,11 @@ class AmendementController extends AbstractController
             $sql .= ' AND COALESCE(a.resume_relu, 0) = 0';
         }
 
-        $sql .= ' ORDER BY s.date_scrutin DESC, s.numero DESC';
+        // Les votes déjà résumés d'abord — ce sont eux que la rédaction peut
+        // relire —, puis du plus intéressant au moins intéressant (legacy).
+        $sql .= ' ORDER BY (a.titre_ia IS NOT NULL) DESC, interet DESC';
 
-        $lignes = $this->connection->fetchAllAssociative($sql, $params, $types);
+        $lignes = $this->connection->fetchAllAssociative($sql, $params);
 
         return $this->render('admin/amendement/index.html.twig', [
             'lignes' => $lignes,
@@ -183,13 +175,15 @@ class AmendementController extends AbstractController
         return new JsonResponse(['success' => true, 'reviewed' => $relu ? 1 : 0]);
     }
 
-    /** Législatures qui portent des scrutins d'amendement, la plus récente en tête. */
+    /**
+     * Législatures qui portent des scrutins liés à un amendement, la plus
+     * récente en tête — le même critère que la liste, sans quoi le sélecteur
+     * proposerait des législatures vides (la 14e n'a aucun lien).
+     */
     private function legislaturesDisponibles(): array
     {
         $valeurs = $this->connection->fetchFirstColumn(
-            'SELECT DISTINCT legislature FROM scrutin WHERE nature_vote IN (:natures) AND legislature IS NOT NULL ORDER BY legislature DESC',
-            ['natures' => self::NATURES],
-            ['natures' => \Doctrine\DBAL\ArrayParameterType::STRING],
+            'SELECT DISTINCT legislature FROM scrutin WHERE amendement_id IS NOT NULL AND legislature IS NOT NULL ORDER BY legislature DESC',
         );
 
         return array_map('intval', $valeurs);

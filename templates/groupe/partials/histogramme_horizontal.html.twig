@@ -14,11 +14,12 @@
         <div class="col-3 d-flex align-items-center justify-content-center">
           <div class="text-center">
             <p class="font-weight-bold mb-0">
-              {# Les sigles d'alliance électorale sont raccourcis dans les seuls
-                 classements — « LFI » ici, « LFI-NFP » partout ailleurs, y
-                 compris dans la légende du graphique de proximité juste
-                 au-dessus. Ce n'est pas une incohérence de portage : c'est le
-                 `remove_nupes()` du site, appliqué à ce gabarit et à lui seul. #}
+              {# Les sigles d'alliance électorale sont raccourcis ici et dans
+                 les légendes du soutien au gouvernement (accueil, page de
+                 groupe) — mais pas dans celle du graphique de proximité juste
+                 au-dessus, qui garde « LFI-NFP ». Ce n'est pas une incohérence
+                 de portage : c'est le `remove_nupes()` du site, appliqué aux
+                 mêmes endroits que lui. #}
               <span class="tooltipHelp tooltipDashed" data-toggle="tooltip" data-placement="top" title="{{ ligne.libelle }}">{{ abreges[ligne.libelle_abrev]|default(ligne.libelle_abrev) }}</span>
             </p>
           </div>
