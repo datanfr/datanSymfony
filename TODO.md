@@ -320,6 +320,9 @@ Pour chacun : comprendre la règle du legacy (la réponse est dans son code, sou
 - [ ] Vérifier les images `posts/inside/` (cf. P1) une fois le domaine basculé.
 - [ ] Rejouer une passe de vérification du sitemap : chaque URL annoncée → 200
   (le critère de `SitemapController` se vérifie en interrogeant réellement).
+- [ ] Retirer le verrou de préproduction : bloc « PRÉPRODUCTION » de
+  `public/.htaccess`, secret `HTTP_AUTH` du workflow, `.htpasswd` du serveur
+  (DEPLOIEMENT.md §6). Sans cela, datan.fr demanderait un mot de passe.
 
 ## Différences assumées — ne PAS « corriger » (consignées pour mémoire)
 

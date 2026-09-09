@@ -67,8 +67,19 @@ jobs:
           echo "✓ En ligne"
           EOF
 
+      # La préproduction est sous mot de passe (bloc « PRÉPRODUCTION » de
+      # public/.htaccess) : sans identifiants, curl reçoit 401 et le contrôle ne
+      # dit rien de l'application. Le secret porte « identifiant:motdepasse » ;
+      # il se retire avec le bloc, le jour de la bascule.
       - name: Vérifier que le site répond
+        env:
+          HTTP_AUTH: ${{ secrets.HTTP_AUTH }}
         run: |
-          code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 "${{ vars.URL_PUBLIQUE }}")
+          identifiants=()
+          if [ -n "$HTTP_AUTH" ]; then identifiants=(-u "$HTTP_AUTH"); fi
+          code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 "${identifiants[@]}" "${{ vars.URL_PUBLIQUE }}")
           echo "HTTP $code sur ${{ vars.URL_PUBLIQUE }}"
+          if [ "$code" = 401 ] && [ -z "$HTTP_AUTH" ]; then
+            echo "!! Le site demande un mot de passe : poser le secret HTTP_AUTH (identifiant:motdepasse)."
+          fi
           test "$code" = "200"

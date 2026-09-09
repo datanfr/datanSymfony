@@ -52,3 +52,9 @@
 
 /assets/vendor/
 ###< symfony/asset-mapper ###
+
+###> préproduction ###
+# Mots de passe HTTP de la préproduction (bloc « PRÉPRODUCTION » de
+# public/.htaccess) : posé à la main sur le serveur, jamais dans le dépôt.
+/.htpasswd
+###< préproduction ###

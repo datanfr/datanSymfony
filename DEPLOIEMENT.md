@@ -328,6 +328,7 @@ serveur étant le même.
 | `DEPLOY_PORT` | secret | port SSH |
 | `DEPLOY_PATH` | variable | `/home/wqktajhw/datan` (valeur par défaut du workflow) |
 | `URL_PUBLIQUE` | variable | `https://datan.remikel.fr` |
+| `HTTP_AUTH` | secret | `datan:<mot de passe>` du verrou de préproduction (§6) ; à supprimer à la bascule |
 
 ### Amorçage, à faire une fois
 
@@ -426,6 +427,11 @@ sudo systemctl enable --now datan-messenger
 
 ### nginx
 
+Cible VPS, non retenue à ce jour : l'hébergement effectif est le mutualisé
+N0C sous LiteSpeed, où `public/.htaccess` tient ce rôle (voir « Verrou de
+préproduction » plus bas). Conservé pour le jour où le site quitterait le
+mutualisé.
+
 ```nginx
 server {
     listen 443 ssl http2;
@@ -521,6 +527,42 @@ production est repris à l'octet près dans
 Le jour de la bascule, rien à faire côté code : `datan.fr` n'est pas dans la
 liste et redevient indexable du seul fait de son nom de domaine.
 
+### Verrou de préproduction : `.htaccess` + `.htpasswd`
+
+L'hébergement effectif est le mutualisé N0C, sous **LiteSpeed**, qui lit les
+`.htaccess` : le bloc « PRÉPRODUCTION » en tête de `public/.htaccess` met tout
+le site derrière un mot de passe HTTP et pose `X-Robots-Tag` sur ce que
+LiteSpeed sert sans passer par PHP (images, feuilles de style, documents). Le
+fichier de mots de passe n'est pas dans le dépôt :
+
+```
+/home/wqktajhw/datan/.htpasswd     # « datan:$apr1$… », lisible par le serveur (644)
+```
+
+- **Hachage apr1 obligatoire** — `openssl passwd -apr1` : le serveur n'a pas
+  `htpasswd`, et LiteSpeed n'est pas garanti sur bcrypt. Ajouter ou remplacer
+  un compte :
+  ```bash
+  printf 'nom:%s\n' "$(openssl passwd -apr1)" >> /home/wqktajhw/datan/.htpasswd
+  ```
+- **Pas de condition sur l'hôte**, contrairement au garde-fou applicatif :
+  LiteSpeed ignore `Require env`, `Require expr` et `Allow from env=` sans rien
+  dire (vérifié sur le serveur le 9 septembre 2026, dans un sous-dossier
+  d'essai). Le bloc est donc inconditionnel, et se retire à la main.
+- **`/robots.txt` n'est pas exempté**, pour la même raison : l'adresse est
+  réécrite vers `index.php`, et `<FilesMatch>` s'applique au fichier final. Un
+  robots.txt en 401 vaut absence de fichier : le moteur tente les pages, reçoit
+  401, n'indexe rien.
+- **Le contrôle final du workflow** lit le secret `HTTP_AUTH`
+  (`identifiant:motdepasse`) ; sans lui, il tombe en 401 et le déploiement est
+  signalé en échec alors qu'il a eu lieu.
+- **Ne pas utiliser l'outil « protection par mot de passe » du panneau N0C**
+  sur ce dossier : il écrit dans `public/.htaccess`, qui est suivi par Git, et
+  le `git pull` du déploiement suivant refuserait de passer.
+
+Le jour de la bascule : retirer le bloc de `public/.htaccess`, le secret
+`HTTP_AUTH`, et supprimer `.htpasswd` du serveur.
+
 ### `.env.local` sur le serveur
 
 Dans `/var/www/datan/shared/.env.local`, en `chmod 600` :
@@ -583,6 +625,9 @@ espérant que ça se voie.
       `curl -I https://datan.remikel.fr/` porte `X-Robots-Tag: noindex`. Le
       contrôle qui compte est celui-ci : la bascule se joue sur le nom de
       domaine servi, donc elle ne se vérifie que depuis le domaine.
+- [ ] `curl -I https://datan.remikel.fr/` répond 401 sans identifiants et 200
+      avec ; une image de `/assets/imgs/` porte `X-Robots-Tag` — elle ne passe
+      pas par PHP, c'est le `.htaccess` qui le pose.
 - [ ] Les redirections 301 du legacy fonctionnent (slugs de département : tester
       `francais-de-letranger`).
 - [ ] Connexion, mot de passe oublié : le courriel **arrive** (worker Messenger).
@@ -597,7 +642,8 @@ espérant que ça se voie.
 Le reste — `TODO.md` §2 — est à dérouler à ce moment-là : variables de suivi
 réelles, transvasement des abonnés newsletter, redirections des anciennes API
 (`api/tables`, `api/votes`, `api/exposes`) qu'API Platform ne reprend pas, et
-retrait de l'`auth_basic` et du `X-Robots-Tag` de la préproduction.
+retrait du verrou de préproduction — bloc « PRÉPRODUCTION » de
+`public/.htaccess`, secret `HTTP_AUTH`, `.htpasswd` du serveur.
 
 Le garde-fou applicatif, lui, n'est pas à toucher : il ne connaît que
 `datan.remikel.fr`, et l'application servie sur `datan.fr` est indexable sans

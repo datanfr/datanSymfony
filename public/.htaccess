@@ -7,6 +7,43 @@
 # Contenu de symfony/apache-pack, que nous n'installons pas comme dépendance :
 # le fichier ne change jamais et le paquet n'apporte rien d'autre.
 
+# ---------------------------------------------------------------------------
+# PRÉPRODUCTION : mot de passe sur tout le site, et non-indexation.
+#
+# À RETIRER le jour de la bascule sur datan.fr, avec le secret HTTP_AUTH du
+# workflow de déploiement (checklist de TODO.md). Le bloc n'est pas conditionné
+# à l'hôte servi, contrairement au garde-fou applicatif (App\Referencement\
+# Indexation) : dans un .htaccess, seuls « Require env » et « Require expr »
+# le permettraient, et LiteSpeed — le serveur de l'hébergement N0C — les ignore
+# sans un mot. Un verrou qui pourrait ne pas s'appliquer en silence est pire
+# qu'un verrou à retirer à la main.
+#
+# Le fichier de mots de passe vit hors de public/ et hors du dépôt, à côté de
+# .env. Hachage apr1 (« openssl passwd -apr1 »), le seul format que LiteSpeed
+# et Apache lisent tous deux ; le serveur n'a pas « htpasswd ». Ajouter un
+# compte :
+#   printf 'nom:%s\n' "$(openssl passwd -apr1)" >> /home/wqktajhw/datan/.htpasswd
+#
+# /robots.txt n'est pas exempté, bien qu'un « Disallow: / » lisible sans mot de
+# passe serait plus net. L'adresse est réécrite vers index.php, et LiteSpeed
+# applique <FilesMatch> au fichier final ; il ignore « Allow from env= » comme
+# « Require env » (vérifié sur le serveur en septembre 2026). Un robots.txt en
+# 401 vaut pour un moteur une absence de fichier : il tente les pages, qui
+# répondent 401 elles aussi — rien ne s'indexe.
+# ---------------------------------------------------------------------------
+AuthType Basic
+AuthName "Datan - preproduction"
+AuthUserFile /home/wqktajhw/datan/.htpasswd
+Require valid-user
+
+# L'application pose déjà cet en-tête sur tout ce qu'elle rend
+# (App\Referencement\EnTeteRobots). Ici il couvre ce que LiteSpeed sert sans
+# passer par PHP : les fichiers de public/ — images, feuilles de style,
+# documents PDF.
+<IfModule mod_headers.c>
+    Header set X-Robots-Tag "noindex, nofollow, noarchive"
+</IfModule>
+
 DirectoryIndex index.php
 
 # MultiViews ferait deviner au serveur l'extension d'un fichier absent et
